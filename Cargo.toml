@@ -1,0 +1,6 @@
+[package]
+name = "mancala"
+version = "0.1.0"
+authors = ["Jason Knight <Jason@JasonKnight.us>"]
+
+[dependencies]
