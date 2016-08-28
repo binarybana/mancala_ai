@@ -54,11 +54,32 @@ impl Display for GameState {
     }
 }
 
-type Action = u8; 
+type Action = u16; 
 type ValueFunction = HashMap<GameState, f64>;
 
 fn is_action_valid(state: &GameState, action: Action) -> bool {
     state.houses[action as usize] > 0
+}
+
+fn push_action(action_list: Action, action: Action) -> Action {
+    assert!(action < 7);
+    action_list << 3 | action
+}
+
+fn pop_action(action: &mut Action) -> Action {
+    let popped_action = *action & 7;
+    *action >>= 3;
+    popped_action
+}
+
+#[test]
+fn test_packed_actions() {
+    let action_1: Action = 3;
+    assert_eq!(action_1, 3);
+    let mut action_2 = push_action(action_1, 4);
+    println!("{:?}", action_2);
+    assert_eq!(pop_action(&mut action_2), 4);
+    assert_eq!(action_2, 3);
 }
 
 fn evaluate_action(state: &GameState, action: Action) -> GameState {
@@ -98,6 +119,21 @@ fn pick_action(state: GameState, values: &ValueFunction) -> Action {
     best.0 // return the best action
 }
 
+#[test]
+fn pick_actions() {
+    let mut value_fun: HashMap<GameState, f64> = HashMap::new();
+    let mut state = GameState::new(4);
+    let mut good_state = evaluate_action(&state, 3);
+    value_fun.insert(good_state, 10.0);
+    assert_eq!(pick_action(state, &value_fun), 3);
+    // Now after swapping the board, it should be a different set of evaluations
+    // (ie: our value_fun info will not be useful for any of these particular actions)
+    swap_board(&mut good_state);
+    let different_state = evaluate_action(&good_state, 1);
+    value_fun.insert(different_state, 4.0);
+    assert_eq!(pick_action(good_state, &value_fun), 1);
+}
+
 /// 'Rotate' the board so player one and two are swapped
 fn swap_board(state: &mut GameState) {
     let N = state.houses.len();
@@ -111,6 +147,18 @@ fn swap_board(state: &mut GameState) {
     state.ezone2 = temp;
 }
 
+#[test]
+fn test_swap_board() {
+    let state = GameState::new(4);
+    let mut state = evaluate_action(&state, 4);
+    assert_eq!(state.houses[4], 0);
+    assert_eq!(state.houses[5], 5);
+    swap_board(&mut state);
+    println!("{}", state);
+    assert_eq!(state.houses[10], 0);
+    assert_eq!(state.houses[11], 5);
+}
+
 fn sarsa_loop(values: &mut HashMap<GameState, f64>,
               learning_rate: f64,
               discount_factor: f64,
@@ -120,24 +168,25 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
         let action = pick_action(state, values);
         loop {
             // TODO implement SARSA reward with discounts
-            if action == 1 || action >= 0 {
-                break
+            if action == 1 {
+                break;
             }
-            swap_board(&mut state);
+            break;
+            // swap_board(&mut state);
         }
     }
 }
     
 fn main() {
     println!("Hello, mancala!");
-    let mut state = GameState::new(4);
+    let state = GameState::new(4);
     println!("Initial board state: \n{}", state);
     let mut state = evaluate_action(&state, 4);
     println!("Played a 2: \n{}", state);
     swap_board(&mut state);
     println!("Player 2's turn: \n{}", state);
     println!("Has the game ended? {}", state.is_ended());
-    let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000_000);
+    let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
     value_fun.insert(state, 1.3);
     sarsa_loop(&mut value_fun, 0.1, 0.1, 1_000);
     println!("Number of values in our state value table/map: {}", value_fun.len());
