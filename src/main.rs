@@ -1,3 +1,6 @@
+#[macro_use] extern crate log;
+extern crate env_logger;
+
 use std::collections::HashMap;
 use std::fmt::{self, Formatter, Display};
 
@@ -55,17 +58,17 @@ impl GameState {
     }
 
     fn next_valid_move(&self) -> Option<Action> {
-        for house in self.houses[0..6] {
-            if self.houses[house] > 0 {
-                Some(house)
+        for house in &self.houses[0..6] {
+            if self.houses[*house as usize] > 0 {
+                return Some(*house as Action);
             }
         }
-        None
+        return None;
     }
 
 
     fn gen_actions(&self) -> ActionIter {
-        ActionIter{ next_action: 0 as Action, state: *self }
+        ActionIter{ next_action: 0 as Action, state: &self }
     }
 
     fn pick_action(self, values: &ValueFunction) -> Action {
@@ -103,7 +106,7 @@ struct ActionIter<'a> {
     state: &'a GameState
 }
 
-impl Iterator for ActionIter {
+impl<'a> Iterator for ActionIter<'a> {
     type Item = Action;
     fn next(&mut self) -> Option<Action> {
         // TODO:
@@ -234,7 +237,8 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
 }
     
 fn main() {
-    println!("Hello, mancala!");
+    env_logger::init().unwrap();
+    info!("Hello, mancala!");
     let state = GameState::new(4);
     println!("Initial board state: \n{}", state);
     let mut state = state.evaluate_action(4);
