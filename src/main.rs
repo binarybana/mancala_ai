@@ -31,36 +31,45 @@ impl GameState {
         return false;
     }
 
-    fn is_action_valid(&self, action: Action) -> bool {
-        self.houses[action as usize] > 0
-    }
-
-    fn evaluate_action(&self, action: Action) -> GameState {
-        let n = self.houses.len();
-        let action = action as usize;
-        let seeds = self.houses[action] as usize;
+    fn evaluate_action(&self, mut action_list: Action) -> GameState {
         let mut new_state = self.clone(); //copy
-        new_state.houses[action] = 0;
-        for i in action+1..action+seeds+1 {
-            if i < 6 {
-                new_state.houses[i%n] += 1;
-            } else if i == 6 { 
-                new_state.ezone2 += 1;
-                // TODO handle other endzone
-            } else {
-                // TODO instead of subtracting one, it needs to be the number of times we've wrapped
-                // through an ezone div(i,6)?
-                new_state.houses[(i-1)%n] += 1;
+        // TODO: make this a proper iterator
+        // for each action in action_list
+        loop {
+            let action = action_list.pop_action() as usize;
+            let seeds = new_state.houses[action] as usize;
+            // Pickup seeds from starting house
+            new_state.houses[action] = 0;
+            // TODO handle other endzone with larger number of seeds:
+            assert!(action+seeds+1 < 12);
+            let end_house = action+seeds;
+            // Deposit seeds in each house around the board
+            for i in action+1..end_house+1 {
+                if i < 6 {
+                    new_state.houses[i] += 1;
+                } else if i == 6 { 
+                    new_state.ezone2 += 1;
+                } else if i > 6 {
+                    new_state.houses[i-1] += 1;
+                }
             }
+            // Capture rule
+            if end_house < 6 && new_state.houses[end_house] == 1 {
+                // add to capture pile
+                new_state.ezone2 += 1 + new_state.houses[end_house+6];
+                // clear houses on both sides
+                new_state.houses[end_house] = 0;
+                new_state.houses[end_house+6] = 0;
+            }
+            if action_list.is_empty() { break; }
         }
-        // TODO need to implement capture rule here
         new_state
     }
 
-    fn next_valid_move(&self) -> Option<Action> {
+    fn next_valid_submove(&self) -> Option<SubAction> {
         for house in &self.houses[0..6] {
             if self.houses[*house as usize] > 0 {
-                return Some(*house as Action);
+                return Some(*house as SubAction);
             }
         }
         return None;
@@ -68,12 +77,11 @@ impl GameState {
 
 
     fn gen_actions(&self) -> ActionIter {
-        ActionIter{ next_action: 0 as Action, state: &self }
+        ActionIter{ action: Action::new(), captured: false, state: &self }
     }
 
     fn pick_action(self, values: &ValueFunction) -> Action {
-        let choices: Vec<(Action, f64)> = (0..6)
-            .filter(|action| self.is_action_valid(*action as Action))
+        let choices: Vec<(Action, f64)> = self.gen_actions()
             .map(|action| (action, self.evaluate_action(action)))
             .map(|(action, possible_state)| (action, *values.get(&possible_state).unwrap_or(&0.1f64)))
             .collect();
@@ -102,24 +110,36 @@ impl GameState {
 }
 
 struct ActionIter<'a> {
-    next_action: Action,
+    action: Action,
+    captured: bool,
     state: &'a GameState
 }
 
 impl<'a> Iterator for ActionIter<'a> {
     type Item = Action;
     fn next(&mut self) -> Option<Action> {
-        // TODO:
-        // use action to update a `copy` of self.state
-        // TODO: 
-        // check to see if we captured
-        // if so, then grab self.state.next_valid_move() and append it to self.next_action
-        if self.next_action < 6 {
-            self.next_action += 1;
-            Some(self.next_action-1)
-        } else {
-            None
-        }
+        unimplemented!();
+        // if captured
+        // if !self.action.is_empty() {
+        //     // find next subaction and return
+        //     // or pop and keep searching?
+        //     self.action.push_action(self.next_valid_submove)
+        //     // }
+        // } else {
+        //     something
+        //
+        // }
+        // // TODO:
+        // // use action to update a `copy` of self.state
+        // // TODO: 
+        // // check to see if we captured
+        // // if so, then grab self.state.next_valid_move() and append it to self.next_action
+        // if self.next_action < 6 {
+        //     self.next_action += 1;
+        //     Some(self.next_action-1)
+        // } else {
+        //     None
+        // }
     }
 }
 
@@ -149,23 +169,44 @@ impl Display for GameState {
 }
 
 pub type ValueFunction = HashMap<GameState, f64>;
-pub type Action = u16; 
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+pub struct Action(u32); 
+pub type SubAction = u8;
 
-pub trait ActionTrait {
-    fn push_action(self, action: Action) -> Action;
-    fn pop_action(&mut self) -> Action;
+pub trait ActionQueue {
+    fn push_action(&mut self, action: SubAction);
+    fn pop_action(&mut self) -> SubAction;
+    fn is_empty(&self) -> bool;
+    fn length(&self) -> u16;
+    fn new() -> Self;
 }
 
-impl ActionTrait for Action {
-    fn push_action(self, action: Action) -> Action {
+impl ActionQueue for Action {
+    fn new() -> Action {
+        Action(0)
+    }
+    
+    fn push_action(&mut self, action: SubAction){
         assert!(action < 7);
-        self << 3 | action
+        let new_len = self.length() as u32 + 1u32;
+        self.0 = self.0 << 3 | action as u32 | new_len << 16;
     }
 
-    fn pop_action(&mut self) -> Action {
-        let popped_action = *self & 7;
-        *self >>= 3;
-        popped_action
+    fn pop_action(&mut self) -> SubAction {
+        let len = self.length() as u32;
+        let shifts = (len-1)*3;
+        let mask = 7 << shifts;
+        let popped_action = (self.0 & mask) >> shifts;
+        self.0 = self.0 ^ mask & !((1<<16)-1) | (len-1) << 16; 
+        popped_action as SubAction
+    }
+
+    fn length(&self) -> u16 {
+        (self.0 >> 16) as u16
+    }
+
+    fn is_empty(&self) -> bool {
+        self.length() == 0
     }
 }
 
@@ -174,47 +215,59 @@ mod test {
     use super::*;
     use std::collections::HashMap;
 
-    #[test]
-    fn test_action_iter() {
-        let state = GameState::new(4);
-        assert_eq!((0..6).collect::<Vec<Action>>(), state.gen_actions().collect::<Vec<Action>>());
-    }
+    // #[test]
+    // fn test_action_iter() {
+    //     let state = GameState::new(4);
+    //     assert_eq!((0..6).collect::<Vec<Action>>(), state.gen_actions().collect::<Vec<Action>>());
+    // }
 
     #[test]
     fn test_packed_actions() {
-        let action_1: Action = 3;
-        assert_eq!(action_1, 3);
-        let mut action_2 = action_1.push_action(4);
-        println!("{:?}", action_2);
-        assert_eq!(action_2.pop_action(), 4);
-        assert_eq!(action_2, 3);
+        let mut action_list: Action = Action::new();
+        assert_eq!(action_list.0, 0);
+        action_list.push_action(4);
+        assert_eq!(action_list.0, 4 | (1<<16));
+        println!("{:?}", action_list);
+        action_list.push_action(3);
+        assert_eq!(action_list.0, 4<<3 | 3 | (2<<16));
+        assert_eq!(action_list.pop_action(), 4);
+        assert_eq!(action_list.0, 3 | (1<<16));
+        action_list.push_action(2);
+        println!("{:?}", action_list);
+        assert_eq!(action_list.pop_action(), 3);
+        assert_eq!(action_list.pop_action(), 2);
+        assert_eq!(action_list.0, 0);
+        action_list.push_action(3);
+        assert_eq!(action_list.0, 3 | (1<<16));
     }
 
     #[test]
     fn pick_actions() {
         let mut value_fun: HashMap<GameState, f64> = HashMap::new();
-        let state = GameState::new(4);
-        let mut good_state = state.evaluate_action(3);
-        value_fun.insert(good_state, 10.0);
-        assert_eq!(state.pick_action(&value_fun), 3);
-        // Now after swapping the board, it should be a different set of evaluations
-        // (ie: our value_fun info will not be useful for any of these particular actions)
-        good_state.swap_board();
-        let different_state = good_state.evaluate_action(1);
-        value_fun.insert(different_state, 4.0);
-        assert_eq!(good_state.pick_action(&value_fun), 1);
+        // let state = GameState::new(4);
+        // let action = Action::new();
+        // action.push_action(3);
+        // let mut good_state = state.evaluate_action(action);
+        // value_fun.insert(good_state, 10.0);
+        // assert_eq!(state.pick_action(&value_fun), action);
+        // // Now after swapping the board, it should be a different set of evaluations
+        // // (ie: our value_fun info will not be useful for any of these particular actions)
+        // good_state.swap_board();
+        // let different_state = good_state.evaluate_action(1);
+        // value_fun.insert(different_state, 4.0);
+        // assert_eq!(good_state.pick_action(&value_fun), 1);
     }
 
     #[test]
     fn test_swap_board() {
-        let state = GameState::new(4);
-        let mut state = state.evaluate_action(4);
-        assert_eq!(state.houses[4], 0);
-        assert_eq!(state.houses[5], 5);
-        state.swap_board();
-        println!("{}", state);
-        assert_eq!(state.houses[10], 0);
-        assert_eq!(state.houses[11], 5);
+        // let state = GameState::new(4);
+        // let mut state = state.evaluate_action(4);
+        // assert_eq!(state.houses[4], 0);
+        // assert_eq!(state.houses[5], 5);
+        // state.swap_board();
+        // println!("{}", state);
+        // assert_eq!(state.houses[10], 0);
+        // assert_eq!(state.houses[11], 5);
     }
 }
 
@@ -227,9 +280,9 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
         let action = state.pick_action(values);
         loop {
             // TODO implement SARSA reward with discounts
-            if action == i as Action {
-                break;
-            }
+            // if action == i as Action {
+            //     break;
+            // }
             break;
             // state.swap_board();
         }
@@ -239,16 +292,16 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
 fn main() {
     env_logger::init().unwrap();
     info!("Hello, mancala!");
-    let state = GameState::new(4);
-    println!("Initial board state: \n{}", state);
-    let mut state = state.evaluate_action(4);
-    println!("Played a 2: \n{}", state);
-    state.swap_board();
-    println!("Player 2's turn: \n{}", state);
-    println!("Has the game ended? {}", state.is_ended());
-    let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
-    value_fun.insert(state, 1.3);
-    sarsa_loop(&mut value_fun, 1_000);
-    // sarsa_loop(&mut value_fun, 0.1, 0.1, 1_000);
-    println!("Number of values in our state value table/map: {}", value_fun.len());
+    // let state = GameState::new(4);
+    // println!("Initial board state: \n{}", state);
+    // let mut state = state.evaluate_action(4);
+    // println!("Played a 2: \n{}", state);
+    // state.swap_board();
+    // println!("Player 2's turn: \n{}", state);
+    // println!("Has the game ended? {}", state.is_ended());
+    // let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
+    // value_fun.insert(state, 1.3);
+    // sarsa_loop(&mut value_fun, 1_000);
+    // // sarsa_loop(&mut value_fun, 0.1, 0.1, 1_000);
+    // println!("Number of values in our state value table/map: {}", value_fun.len());
 }
