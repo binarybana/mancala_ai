@@ -38,16 +38,21 @@ impl GameState {
 
     /// Return a new game state when playing out a sequence of actions (a string of capturing
     /// moves)
-    fn evaluate_action(&self, mut action_list: Action) -> GameState {
-        let mut new_state = self.clone(); //copy
+    fn evaluate_to_new_state(&self, mut action_list: Action) -> GameState {
+        let mut new_state = self.clone();
+        new_state.evaluate_action(action_list);
+        new_state
+    }
+
+    /// Mutate the current game state when playing out a full action sequence
+    fn evaluate_action(&mut self, mut action_list: Action) {
         // TODO: make this a proper iterator
         // for each action in action_list
         loop {
             let subaction = action_list.pop_action();
-            new_state.evaluate_subaction(subaction);
+            self.evaluate_subaction(subaction);
             if action_list.is_empty() { break; }
         }
-        new_state
     }
 
     /// Mutate the current game state when playing out a single subaction
@@ -57,7 +62,7 @@ impl GameState {
         // Pickup seeds from starting house
         self.houses[action] = 0;
         // TODO handle other endzone with larger number of seeds:
-        assert!(action+seeds+1 < 12);
+        assert!(action+seeds+1 < 18);
         let end_house = action+seeds;
         // Deposit seeds in each house around the board
         for i in action+1..end_house+1 {
@@ -65,8 +70,12 @@ impl GameState {
                 self.houses[i] += 1;
             } else if i == 6 { 
                 self.ezone2 += 1;
-            } else if i > 6 {
+            } else if i > 6 && i < 13 {
                 self.houses[i-1] += 1;
+            } else if i == 13 {
+                self.ezone1 += 1;
+            } else {
+                self.houses[i-2] += 1;
             }
         }
         // Capture rule
@@ -76,6 +85,7 @@ impl GameState {
             // clear houses on both sides
             self.houses[end_house] = 0;
             self.houses[end_house+6] = 0;
+            info!("Capture detected!");
         }
     }
 
@@ -95,9 +105,10 @@ impl GameState {
 
     fn pick_action(self, values: &ValueFunction) -> Action {
         let choices: Vec<(Action, f64)> = self.gen_actions()
-            .map(|action| (action, self.evaluate_action(action)))
+            .map(|action| (action, self.evaluate_to_new_state(action)))
             .map(|(action, possible_state)| (action, *values.get(&possible_state).unwrap_or(&0.1f64)))
             .collect();
+        info!("Actions available to choose from: {:?}", choices);
         let mut best = &choices[0];
         for choice in &choices {
             if choice.1 > best.1 {
@@ -134,6 +145,8 @@ impl<'a> Iterator for ActionIter<'a> {
         let mut action = Action::new();
         for index in self.next_subaction..6 {
             if self.state.houses[index as usize] > 0 {
+                info!("Pushing subaction of {} because there are {} seeds there",
+                      index, self.state.houses[index as usize]);
                 action.push_action(index);
                 self.next_subaction = index + 1;
                 return Some(action);
@@ -246,14 +259,18 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
               episodes: usize) {
     for i in 0..episodes {
         let mut state = GameState::new(4);
-        let action = state.pick_action(values);
+        info!(">>>>>>>>>>>>>>>>>");
         let mut counter = 0;
         loop {
             // TODO implement SARSA reward with discounts
             // if action == i as Action {
             //     break;
             // }
-            let mut state = state.evaluate_action(action);
+            info!("Turn {}", counter);
+            let action = state.pick_action(values);
+            info!("State: \n{:?}", state);
+            info!("Action: {:?}", action);
+            state.evaluate_action(action);
             if state.is_ended() {
                 println!("Game ended at state:");
                 println!("{:?}", state);
@@ -261,10 +278,12 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             }
             counter += 1;
             if counter % 10_000 == 0 {
-                println!("Iteration {}", counter);
+                info!("Iteration {}", counter);
             }
             state.swap_board();
-            let action = state.pick_action(values);
+            info!("State after swap and eval: {:?}", state);
+            if counter > 19 { break; }
+            info!(">>>>>>>>>>>>>>>>>");
         }
     }
 }
@@ -281,7 +300,7 @@ fn main() {
     // println!("Has the game ended? {}", state.is_ended());
     let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
     // value_fun.insert(state, 1.3);
-    sarsa_loop(&mut value_fun, 1_000);
+    sarsa_loop(&mut value_fun, 1);
     // // sarsa_loop(&mut value_fun, 0.1, 0.1, 1_000);
     // println!("Number of values in our state value table/map: {}", value_fun.len());
 }
