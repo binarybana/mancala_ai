@@ -9,3 +9,12 @@ Initial goals (phase one):
 Phase two through N:
 - Try TD(\lambda) approaches with eligibilty traces
 - Use function approximation for the value or state-action function (implement a little fully connected neural net interface or call out to Neon through python?)
+
+## Project structure
+
+(eventually):
+
+- Driver code (main.rs)
+- Simulator interface
+  - Mancala world implementation
+- RL code
