@@ -9,27 +9,22 @@ use packed_actions::{Action, SubAction, ActionQueue};
 
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct GameState {
-    houses: [u8; 12],
-    ezone1: u8,
-    ezone2: u8,
-    turn: u8,
-    move_counter: u32
+    houses: [u8; 14],
 }
 
 impl GameState {
     /// Create a new board initialized with each house having `starting_seeds` number of seeds.
     fn new(starting_seeds: u8) -> GameState {
-        GameState{ houses: [starting_seeds; 12],
-                   ezone1: 0,
-                   ezone2: 0,
-                   turn: 0,
-                   move_counter: 0 }
+        let mut state = GameState{ houses: [starting_seeds; 14] };
+        state.houses[6] = 0;
+        state.houses[13] = 0;
+        state
     }
     
     /// Is the game completely over where one player has emptied their side of the board?
     fn is_ended(&self) -> bool {
         let p1_tot: u8 = self.houses[..6].iter().fold(0, std::ops::Add::add);
-        let p2_tot: u8 = self.houses[6..].iter().fold(0, std::ops::Add::add);
+        let p2_tot: u8 = self.houses[7..14].iter().fold(0, std::ops::Add::add);
         if p1_tot == 0 || p2_tot == 0 {
             return true;
         }
@@ -38,7 +33,7 @@ impl GameState {
 
     /// Return a new game state when playing out a sequence of actions (a string of capturing
     /// moves)
-    fn evaluate_to_new_state(&self, mut action_list: Action) -> GameState {
+    fn evaluate_to_new_state(&self, action_list: Action) -> GameState {
         let mut new_state = self.clone();
         new_state.evaluate_action(action_list);
         new_state
@@ -58,51 +53,34 @@ impl GameState {
     /// Mutate the current game state when playing out a single subaction
     fn evaluate_subaction(&mut self, subaction: SubAction) {
         let action = subaction as usize;
+        assert!(action != 6 && action != 13);
         let seeds = self.houses[action] as usize;
         // Pickup seeds from starting house
         self.houses[action] = 0;
-        // TODO handle other endzone with larger number of seeds:
-        assert!(action+seeds+1 < 24);
-        let end_house = action+seeds;
+        let end_house = action+seeds % 14;
         // Deposit seeds in each house around the board
         for i in action+1..end_house+1 {
-            if i < 6 {
-                self.houses[i] += 1;
-            } else if i == 6 { 
-                self.ezone2 += 1;
-            } else if i > 6 && i < 13 {
-                self.houses[i-1] += 1;
-            } else if i == 13 {
-                self.ezone1 += 1;
-            } else if i > 13 && i < 18 {
-                self.houses[i-12-2] += 1;
-            } else if i == 18 {
-                self.ezone2 += 1;
-            } else {
-                self.houses[i-18-3] += 1;
-            }
+            self.houses[i%14] += 1;
         }
-        // FIXME: oops, not accounting for wraparound here
         // Capture rule
         if end_house < 6 && self.houses[end_house] == 1 {
             // add to capture pile
-            self.ezone2 += 1 + self.houses[end_house+6];
+            self.houses[6] += 1 + self.houses[end_house+7];
             // clear houses on both sides
             self.houses[end_house] = 0;
-            self.houses[end_house+6] = 0;
+            self.houses[end_house+7] = 0;
             info!("Capture detected!");
         }
     }
 
-    fn next_valid_submove(&self) -> Option<SubAction> {
-        for house in &self.houses[0..6] {
-            if self.houses[*house as usize] > 0 {
-                return Some(*house as SubAction);
-            }
-        }
-        return None;
-    }
-
+    // fn next_valid_submove(&self) -> Option<SubAction> {
+    //     for house in &self.houses[0..6] {
+    //         if self.houses[*house as usize] > 0 {
+    //             return Some(*house as SubAction);
+    //         }
+    //     }
+    //     return None;
+    // }
 
     fn gen_actions(&self) -> ActionIter {
         ActionIter{ next_subaction: 0, state: &self }
@@ -111,16 +89,18 @@ impl GameState {
     fn pick_action(self, values: &ValueFunction) -> (Action, f64) {
         let choices: Vec<(Action, f64)> = self.gen_actions()
             .map(|action| (action, self.evaluate_to_new_state(action)))
-            .map(|(action, possible_state)| (action, *values.get(&possible_state).unwrap_or(&0.1f64)))
+            .map(|(action, possible_state)| (action, *values.get(&possible_state)
+                                             .unwrap_or(&0.1f64)))
             .collect();
         info!("Actions available to choose from: {:?}", choices);
+        assert!(choices.len() > 0);
         let mut best = &choices[0];
         for choice in &choices {
             if choice.1 > best.1 {
                 best = choice;
             }
         }
-        (best.0, best.1) // return the best action
+        best.clone()
     }
 
     /// 'Rotate' the board so player one and two are swapped
@@ -131,11 +111,7 @@ impl GameState {
             self.houses[i] = self.houses[n/2+i];
             self.houses[n/2+i] = temp;
         }
-        let temp = self.ezone1;
-        self.ezone1 = self.ezone2;
-        self.ezone2 = temp;
     }
-
 }
 
 struct ActionIter<'a> {
@@ -189,21 +165,17 @@ impl Display for GameState {
         // upper row
         try!(write!(f, "+-------------------------------+\n\
                    |   |"));
-
         // player 2
-        for house in self.houses[6..].iter().rev() {
+        for house in self.houses[7..13].iter().rev() {
             try!(write!(f, "{:2} |", house));
         }
-
         // end zones
         try!(write!(f, "   |\n|{:2} |                       |{:2} |\n\
-                   |   |", self.ezone1, self.ezone2));
-
+                   |   |", self.houses[13], self.houses[6]));
         // player 1
-        for house in &self.houses[..6] {
+        for house in &self.houses[0..6] {
             try!(write!(f, "{:2} |", house));
         }
-
         // last line
         write!(f, "   |\n+-------------------------------+\n")
     }
@@ -258,8 +230,8 @@ mod test {
         assert_eq!(state.houses[5], 5);
         state.swap_board();
         println!("{}", state);
-        assert_eq!(state.houses[10], 0);
-        assert_eq!(state.houses[11], 5);
+        assert_eq!(state.houses[11], 0);
+        assert_eq!(state.houses[12], 5);
     }
 }
 
@@ -288,11 +260,11 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
                 action = tup.0;
                 q_next = tup.1;
             }
-            let score_diff = state.ezone2 as f64 - state.ezone1 as f64;
+            let score_diff = state.houses[6] as f64 - state.houses[13] as f64;
             info!("State: \n{}", state);
             info!("Action: {}", action);
             state.evaluate_action(action);
-            let reward = (state.ezone2 as f64 - state.ezone1 as f64) - score_diff;
+            let reward = (state.houses[6] as f64 - state.houses[13] as f64) - score_diff;
             info!("Reward: {}, score_diff: {}", reward, score_diff);
             let q_ref = values.entry(state).or_insert(default_state_val);
             *q_ref += learning_rate * (reward as f64 + discount_factor * q_next - q_prev);
@@ -305,9 +277,6 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
                 break;
             }
             counter += 1;
-            if counter % 10_000 == 0 {
-                info!("Iteration {}", counter);
-            }
             state.swap_board();
             info!(">>>>>>>>>>>>>>>>>");
         }
@@ -319,5 +288,15 @@ fn main() {
     env_logger::init().unwrap();
     info!("Hello, mancala!");
     let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
-    sarsa_loop(&mut value_fun, 0.1, 0.1, 100);
+    // if let Ok(runs) = std::env::args().next().ok_or("blah").and_then(|x| x.parse::<usize>()) {
+    //     sarsa_loop(&mut value_fun, 0.1, 0.1, runs);
+    // } else {
+    //     println!("Need to give number of runs you want to do");
+    // }
+
+    let args: Vec<String> = std::env::args().collect();
+    match args[1].parse::<usize>() {
+       Ok(runs) => sarsa_loop(&mut value_fun, 0.1, 0.1, runs),
+       _ => println!("Need to give number of runs you want to do"),
+    }
 }
