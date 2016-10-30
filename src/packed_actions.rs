@@ -1,6 +1,19 @@
+use std::fmt::{self, Formatter, Display};
+
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct Action(u32);
 pub type SubAction = u8;
+
+impl Display for Action {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let mut copy = self.clone();
+        try!(write!(f, "(len: {}; ", self.length()));
+        while !copy.is_empty() {
+            try!(write!(f, "{},", copy.pop_action()));
+        }
+        write!(f, ")")
+    }
+}
 
 pub trait ActionQueue {
     fn push_action(&mut self, action: SubAction);

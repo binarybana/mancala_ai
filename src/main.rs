@@ -62,7 +62,7 @@ impl GameState {
         // Pickup seeds from starting house
         self.houses[action] = 0;
         // TODO handle other endzone with larger number of seeds:
-        assert!(action+seeds+1 < 18);
+        assert!(action+seeds+1 < 24);
         let end_house = action+seeds;
         // Deposit seeds in each house around the board
         for i in action+1..end_house+1 {
@@ -74,10 +74,15 @@ impl GameState {
                 self.houses[i-1] += 1;
             } else if i == 13 {
                 self.ezone1 += 1;
+            } else if i > 13 && i < 18 {
+                self.houses[i-12-2] += 1;
+            } else if i == 18 {
+                self.ezone2 += 1;
             } else {
-                self.houses[i-2] += 1;
+                self.houses[i-18-3] += 1;
             }
         }
+        // FIXME: oops, not accounting for wraparound here
         // Capture rule
         if end_house < 6 && self.houses[end_house] == 1 {
             // add to capture pile
@@ -103,7 +108,7 @@ impl GameState {
         ActionIter{ next_subaction: 0, state: &self }
     }
 
-    fn pick_action(self, values: &ValueFunction) -> Action {
+    fn pick_action(self, values: &ValueFunction) -> (Action, f64) {
         let choices: Vec<(Action, f64)> = self.gen_actions()
             .map(|action| (action, self.evaluate_to_new_state(action)))
             .map(|(action, possible_state)| (action, *values.get(&possible_state).unwrap_or(&0.1f64)))
@@ -115,7 +120,7 @@ impl GameState {
                 best = choice;
             }
         }
-        best.0 // return the best action
+        (best.0, best.1) // return the best action
     }
 
     /// 'Rotate' the board so player one and two are swapped
@@ -187,16 +192,16 @@ impl Display for GameState {
 
         // player 2
         for house in self.houses[6..].iter().rev() {
-            try!(write!(f, " {} |", house));
+            try!(write!(f, "{:2} |", house));
         }
 
         // end zones
-        try!(write!(f, "   |\n| {} |                       | {} |\n\
+        try!(write!(f, "   |\n|{:2} |                       |{:2} |\n\
                    |   |", self.ezone1, self.ezone2));
 
         // player 1
         for house in &self.houses[..6] {
-            try!(write!(f, " {} |", house));
+            try!(write!(f, "{:2} |", house));
         }
 
         // last line
@@ -226,24 +231,29 @@ mod test {
     #[test]
     fn pick_actions() {
         let mut value_fun: HashMap<GameState, f64> = HashMap::new();
-        let state = GameState::new(4);
+        let mut state = GameState::new(4);
         let action = Action::singleton(3);
-        let mut good_state = state.evaluate_action(action);
+        let mut good_state = state.clone();
+        good_state.evaluate_action(action);
         value_fun.insert(good_state, 10.0);
-        assert_eq!(state.pick_action(&value_fun), action);
-        // Now after swapping the board, it should be a different set of evaluations
-        // (ie: our value_fun info will not be useful for any of these particular actions)
-        good_state.swap_board();
-        let different_state = good_state.evaluate_action(Action::singleton(1));
-        value_fun.insert(different_state, 4.0);
-        assert_eq!(good_state.pick_action(&value_fun), Action::singleton(1));
+        assert_eq!(state.pick_action(&value_fun).0, action);
+        // Now after performing that option and swapping the board, it should be a 
+        // different set of evaluations (ie: our value_fun info will not be useful 
+        // for any of these particular actions)
+        state.evaluate_action(action);
+        state.swap_board();
+        let mut p2_good_state = state.clone();
+        p2_good_state.evaluate_action(Action::singleton(1));
+        value_fun.insert(p2_good_state, 4.0);
+        println!("{:?}", state.pick_action(&value_fun));
+        assert_eq!(state.pick_action(&value_fun).0, Action::singleton(1));
     }
 
     #[test]
     fn test_swap_board() {
-        let state = GameState::new(4);
+        let mut state = GameState::new(4);
         let action = Action::singleton(4);
-        let mut state = state.evaluate_action(action);
+        state.evaluate_action(action);
         assert_eq!(state.houses[4], 0);
         assert_eq!(state.houses[5], 5);
         state.swap_board();
@@ -254,26 +264,44 @@ mod test {
 }
 
 fn sarsa_loop(values: &mut HashMap<GameState, f64>,
-              // learning_rate: f64,
-              // discount_factor: f64,
+              learning_rate: f64,
+              discount_factor: f64,
               episodes: usize) {
-    for i in 0..episodes {
+    let default_state_val = 0.1f64;
+    let mut q_prev = 0.0;
+    let mut q_next = 0.0;
+    let mut action = Action::new();
+    
+    for _ in 0..episodes {
         let mut state = GameState::new(4);
+        info!("");
+        info!("");
+        info!("######################");
+        info!("######################");
         info!(">>>>>>>>>>>>>>>>>");
         let mut counter = 0;
         loop {
-            // TODO implement SARSA reward with discounts
-            // if action == i as Action {
-            //     break;
-            // }
             info!("Turn {}", counter);
-            let action = state.pick_action(values);
-            info!("State: \n{:?}", state);
-            info!("Action: {:?}", action);
+            {
+                q_prev = *values.get(&state).unwrap_or(&default_state_val);
+                let tup = state.pick_action(values);
+                action = tup.0;
+                q_next = tup.1;
+            }
+            let score_diff = state.ezone2 as f64 - state.ezone1 as f64;
+            info!("State: \n{}", state);
+            info!("Action: {}", action);
             state.evaluate_action(action);
+            let reward = (state.ezone2 as f64 - state.ezone1 as f64) - score_diff;
+            info!("Reward: {}, score_diff: {}", reward, score_diff);
+            let q_ref = values.entry(state).or_insert(default_state_val);
+            *q_ref += learning_rate * (reward as f64 + discount_factor * q_next - q_prev);
+            info!("q_ref += learning_rate * (reward + discount_factor * q_next - q_prev)\n\
+            {} += {} * ({} + {} * {} - {})",
+            *q_ref, learning_rate, reward, discount_factor, q_next, q_prev);
             if state.is_ended() {
                 println!("Game ended at state:");
-                println!("{:?}", state);
+                println!("{}", state);
                 break;
             }
             counter += 1;
@@ -281,26 +309,15 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
                 info!("Iteration {}", counter);
             }
             state.swap_board();
-            info!("State after swap and eval: {:?}", state);
-            if counter > 19 { break; }
             info!(">>>>>>>>>>>>>>>>>");
         }
     }
+    println!("Value function: {:?}", values.values().collect::<Vec<_>>());
 }
     
 fn main() {
     env_logger::init().unwrap();
     info!("Hello, mancala!");
-    // let state = GameState::new(4);
-    // println!("Initial board state: \n{}", state);
-    // let mut state = state.evaluate_action(4);
-    // println!("Played a 2: \n{}", state);
-    // state.swap_board();
-    // println!("Player 2's turn: \n{}", state);
-    // println!("Has the game ended? {}", state.is_ended());
     let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
-    // value_fun.insert(state, 1.3);
-    sarsa_loop(&mut value_fun, 1);
-    // // sarsa_loop(&mut value_fun, 0.1, 0.1, 1_000);
-    // println!("Number of values in our state value table/map: {}", value_fun.len());
+    sarsa_loop(&mut value_fun, 0.1, 0.1, 100);
 }
