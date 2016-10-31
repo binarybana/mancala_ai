@@ -1,8 +1,18 @@
 [package]
+authors = ["Jason Knight <Jason@JasonKnight.us>"]
 name = "mancala"
 version = "0.1.0"
-authors = ["Jason Knight <Jason@JasonKnight.us>"]
 
 [dependencies]
-log = "0.3"
 env_logger = "0.3"
+log = "0.3"
+serde = "0.8.16"
+serde_derive = "0.8.16"
+serde_json = "0.8.3"
+
+[dependencies.clap]
+version = "2.16.3"
+default-features = false
+
+# Cherry-pick the features you'd like to use
+features = [ "suggestions", "color" ]

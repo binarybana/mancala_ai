@@ -1,4 +1,11 @@
-#[macro_use] extern crate log;
+#![feature(proc_macro)]
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
+extern crate clap;
+use clap::{Arg, App, SubCommand, AppSettings};
+#[macro_use]
+extern crate log;
 extern crate env_logger;
 
 use std::collections::HashMap;
@@ -7,7 +14,8 @@ use std::fmt::{self, Formatter, Display};
 mod packed_actions;
 use packed_actions::{Action, SubAction, ActionQueue};
 
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug,
+         Eq, PartialEq, Hash, Copy, Clone)]
 pub struct GameState {
     houses: [u8; 14],
 }
@@ -292,18 +300,25 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
 fn main() {
     env_logger::init().unwrap();
     info!("Hello, mancala!");
-    let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
+    let matches = App::new("mancala")
+                          .setting(AppSettings::ColorAlways)
+                          .version("0.1")
+                          .author("Jason Knight <jason@jasonknight.usm>")
+                          .about("Teachs an AI to play Mancala with reinforcement learning")
+                          .args_from_usage(
+                              "<NUM_RUNS>           'Number of rounds of gameplay to simulate'")
+                          // .subcommand(SubCommand::with_name("test")
+                          //             .about("controls testing features")
+                          //             .version("1.3")
+                          //             .author("Someone E. <someone_else@other.com>")
+                          //             .arg_from_usage("-d, --debug 'Print debug information'"))
+                          .get_matches();
 
-    // TODO: replace this awful mess of command line with clap-rs or something
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() != 2 {
-        println!("Need to input number of runs desired");
-        std::process::exit(-1);
-    }
-    match args[1].parse::<usize>() {
-       Ok(runs) => sarsa_loop(&mut value_fun, 0.1, 0.1, runs),
-       _ => println!("Need to give number of runs you want to do"),
-    }
+
+    let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
+    let num_runs = matches.value_of("NUM_RUNS").unwrap().parse::<usize>().expect("Not an integer");
+    sarsa_loop(&mut value_fun, 0.01, 0.9, num_runs);
+
     let mut qvals: Vec<_> = value_fun.values().collect();
     qvals.sort_by(|a, b| b.partial_cmp(a).unwrap());
     println!("Some top values from value_fun:");
@@ -311,4 +326,15 @@ fn main() {
         println!("\t{}", val);
     }
     println!("Number of entries in value function: {}", value_fun.len());
+
+    let mut vals = value_fun.iter().collect::<Vec<_>>();
+    vals.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+    println!("Here's a few of the top values and states:");
+    for pair in vals.iter().take(5) {
+        println!("\n#########\n{}:\n", pair.1);
+        println!("{}", pair.0);
+        // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
+        // println!("serialized = {}", serialized);
+    }
+
 }
