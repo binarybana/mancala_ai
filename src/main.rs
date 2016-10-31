@@ -23,11 +23,13 @@ impl GameState {
     
     /// Is the game completely over where one player has emptied their side of the board?
     fn is_ended(&self) -> bool {
-        let p1_tot: u8 = self.houses[..6].iter().fold(0, std::ops::Add::add);
-        let p2_tot: u8 = self.houses[7..14].iter().fold(0, std::ops::Add::add);
+        let p1_tot: u8 = self.houses[..6].iter().sum();
+        let p2_tot: u8 = self.houses[7..13].iter().sum();
         if p1_tot == 0 || p2_tot == 0 {
             return true;
+            info!("Checking if game is ended: Yes!");
         }
+        info!("Checking if game is ended: no... {}, {}", p1_tot, p2_tot);
         return false;
     }
 
@@ -65,10 +67,11 @@ impl GameState {
         // Capture rule
         if end_house < 6 && self.houses[end_house] == 1 {
             // add to capture pile
-            self.houses[6] += 1 + self.houses[end_house+7];
+            let opposing_house = 12 - end_house;
+            self.houses[6] += 1 + self.houses[opposing_house];
             // clear houses on both sides
             self.houses[end_house] = 0;
-            self.houses[end_house+7] = 0;
+            self.houses[opposing_house] = 0;
             info!("Capture detected!");
         }
     }
@@ -93,6 +96,9 @@ impl GameState {
                                              .unwrap_or(&0.1f64)))
             .collect();
         info!("Actions available to choose from: {:?}", choices);
+        if choices.len() == 0 {
+            println!("state: {}", self);
+        }
         assert!(choices.len() > 0);
         let mut best = &choices[0];
         for choice in &choices {
@@ -272,8 +278,8 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             {} += {} * ({} + {} * {} - {})",
             *q_ref, learning_rate, reward, discount_factor, q_next, q_prev);
             if state.is_ended() {
-                println!("Game ended at state:");
-                println!("{}", state);
+                info!("Game ended at state:");
+                info!("{}", state);
                 break;
             }
             counter += 1;
@@ -281,22 +287,28 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             info!(">>>>>>>>>>>>>>>>>");
         }
     }
-    println!("Value function: {:?}", values.values().collect::<Vec<_>>());
 }
     
 fn main() {
     env_logger::init().unwrap();
     info!("Hello, mancala!");
     let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
-    // if let Ok(runs) = std::env::args().next().ok_or("blah").and_then(|x| x.parse::<usize>()) {
-    //     sarsa_loop(&mut value_fun, 0.1, 0.1, runs);
-    // } else {
-    //     println!("Need to give number of runs you want to do");
-    // }
 
+    // TODO: replace this awful mess of command line with clap-rs or something
     let args: Vec<String> = std::env::args().collect();
+    if args.len() != 2 {
+        println!("Need to input number of runs desired");
+        std::process::exit(-1);
+    }
     match args[1].parse::<usize>() {
        Ok(runs) => sarsa_loop(&mut value_fun, 0.1, 0.1, runs),
        _ => println!("Need to give number of runs you want to do"),
     }
+    let mut qvals: Vec<_> = value_fun.values().collect();
+    qvals.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    println!("Some top values from value_fun:");
+    for val in &qvals[..10] {
+        println!("\t{}", val);
+    }
+    println!("Number of entries in value function: {}", value_fun.len());
 }
