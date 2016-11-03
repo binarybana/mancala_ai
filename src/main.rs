@@ -1,12 +1,46 @@
-#![feature(proc_macro)]
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
-extern crate clap;
-use clap::{Arg, App, SubCommand, AppSettings};
+// #![feature(proc_macro)]
+// #[macro_use]
+// extern crate serde_derive;
+// extern crate serde_json;
+// extern crate clap;
+// use clap::{Arg, App, SubCommand, AppSettings};
+
+extern crate rustc_serialize;
+extern crate docopt;
+
+use docopt::Docopt;
+
+const USAGE: &'static str = "
+Mancala AI using reinforcement learning.
+
+Usage:
+  mancala [--num-runs=<num-runs>] [--learning-rate=<a>] [--discount-rate=<g>] [--epsilon=<epsilon>]
+  mancala (-h | --help)
+  mancala --version
+
+Options:
+  -h --help              Show this screen.
+  --version              Show version.
+  --num-runs=<num-runs>  Number of complete games [default: 10].
+  --epsilon=<epsilon>    Epsilon for non-greedy actions [default: 0.02].
+  --learning-rate=<a>    Learning rate [default: 0.05].
+  --discount-rate=<g>    Discount rate [default: 1.0].
+";
+
+#[derive(Debug, RustcDecodable)]
+struct Args {
+    flag_num_runs: usize,
+    flag_epsilon: f64,
+    flag_learning_rate: f64,
+    flag_discount_rate: f64,
+}
+
+
 #[macro_use]
 extern crate log;
 extern crate env_logger;
+extern crate rand;
+use rand::Rng;
 
 use std::collections::HashMap;
 use std::fmt::{self, Formatter, Display};
@@ -14,7 +48,8 @@ use std::fmt::{self, Formatter, Display};
 mod packed_actions;
 use packed_actions::{Action, SubAction, ActionQueue};
 
-#[derive(Serialize, Deserialize, Debug,
+// #[derive(Serialize, Deserialize, Debug,
+#[derive(Debug,
          Eq, PartialEq, Hash, Copy, Clone)]
 pub struct GameState {
     houses: [u8; 14],
@@ -97,11 +132,11 @@ impl GameState {
         ActionIter{ next_subaction: 0, state: &self }
     }
 
-    fn pick_action(self, values: &ValueFunction) -> (Action, f64) {
+    fn pick_action(self, epsilon: f64, values: &ValueFunction) -> (Action, f64) {
         let choices: Vec<(Action, f64)> = self.gen_actions()
             .map(|action| (action, self.evaluate_to_new_state(action)))
             .map(|(action, possible_state)| (action, *values.get(&possible_state)
-                                             .unwrap_or(&0.1f64)))
+                                             .unwrap_or(&0.5f64)))
             .collect();
         info!("Actions available to choose from: {:?}", choices);
         if choices.len() == 0 {
@@ -109,9 +144,14 @@ impl GameState {
         }
         assert!(choices.len() > 0);
         let mut best = &choices[0];
-        for choice in &choices {
-            if choice.1 > best.1 {
-                best = choice;
+        if rand::random::<f64>() < epsilon {
+            // randomly make a move
+            best = rand::thread_rng().choose(&choices).unwrap();
+         } else {
+            for choice in &choices {
+                if choice.1 > best.1 {
+                    best = choice;
+                }
             }
         }
         best.clone()
@@ -222,7 +262,7 @@ mod test {
         let mut good_state = state.clone();
         good_state.evaluate_action(action);
         value_fun.insert(good_state, 10.0);
-        assert_eq!(state.pick_action(&value_fun).0, action);
+        assert_eq!(state.pick_action(0.0, &value_fun).0, action);
         // Now after performing that option and swapping the board, it should be a 
         // different set of evaluations (ie: our value_fun info will not be useful 
         // for any of these particular actions)
@@ -231,8 +271,16 @@ mod test {
         let mut p2_good_state = state.clone();
         p2_good_state.evaluate_action(Action::singleton(1));
         value_fun.insert(p2_good_state, 4.0);
-        println!("{:?}", state.pick_action(&value_fun));
-        assert_eq!(state.pick_action(&value_fun).0, Action::singleton(1));
+        println!("{:?}", state.pick_action(0.0, &value_fun));
+        assert_eq!(state.pick_action(0.0, &value_fun).0, Action::singleton(1));
+
+        let mut mut_flag = false;
+        for _ in 0..10 {
+            if state.pick_action(1.0, &value_fun).0 != Action::singleton(1) {
+                mut_flag = true;
+            }
+        }
+        assert_eq!(mut_flag, true);
     }
 
     #[test]
@@ -250,15 +298,19 @@ mod test {
 }
 
 fn sarsa_loop(values: &mut HashMap<GameState, f64>,
+              epsilon: f64,
               learning_rate: f64,
               discount_factor: f64,
               episodes: usize) {
-    let default_state_val = 0.1f64;
+    let default_state_val = 0.5f64;
     let mut q_prev = 0.0;
     let mut q_next = 0.0;
     let mut action = Action::new();
     
     for _ in 0..episodes {
+        let mut last_p1_state = GameState::new(4);
+        let mut last_p2_state = GameState::new(4);
+        let mut last_state = GameState::new(4);
         let mut state = GameState::new(4);
         info!("");
         info!("");
@@ -268,9 +320,10 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
         let mut counter = 0;
         loop {
             info!("Turn {}", counter);
+            last_state = if counter % 2 == 0 { last_p1_state } else { last_p2_state };
             {
-                q_prev = *values.get(&state).unwrap_or(&default_state_val);
-                let tup = state.pick_action(values);
+                q_prev = *values.get(&last_state).unwrap_or(&default_state_val);
+                let tup = state.pick_action(epsilon, values);
                 action = tup.0;
                 q_next = tup.1;
             }
@@ -278,19 +331,39 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             info!("State: \n{}", state);
             info!("Action: {}", action);
             state.evaluate_action(action);
-            let reward = (state.houses[6] as f64 - state.houses[13] as f64) - score_diff;
+            // let reward = (state.houses[6] as f64 - state.houses[13] as f64) - score_diff;
+            // FIXME: noop
+            let reward = if state.is_ended() { 0 } else { 0 };
             info!("Reward: {}, score_diff: {}", reward, score_diff);
-            let q_ref = values.entry(state).or_insert(default_state_val);
-            *q_ref += learning_rate * (reward as f64 + discount_factor * q_next - q_prev);
-            info!("q_ref += learning_rate * (reward + discount_factor * q_next - q_prev)\n\
-            {} += {} * ({} + {} * {} - {})",
-            *q_ref, learning_rate, reward, discount_factor, q_next, q_prev);
+            {
+                let q_ref = values.entry(state).or_insert(default_state_val);
+                *q_ref += learning_rate * (reward as f64 + discount_factor * q_next - q_prev);
+                info!("q_ref += learning_rate * (reward + discount_factor * q_next - q_prev)\n\
+                    {} += {} * ({} + {} * {} - {})",
+                    *q_ref, learning_rate, reward, discount_factor, q_next, q_prev);
+            }
             if state.is_ended() {
+
                 info!("Game ended at state:");
                 info!("{}", state);
+                counter += 1;
+                if counter % 2 == 0 {
+                    // Player 2's turn just finished
+                    *values.entry(last_p2_state).or_insert(default_state_val) = 1.0;
+                    *values.entry(last_p1_state).or_insert(default_state_val) = -1.0;
+                } else {
+                    *values.entry(last_p1_state).or_insert(default_state_val) = 1.0;
+                    *values.entry(last_p2_state).or_insert(default_state_val) = -1.0;
+                }
                 break;
             }
             counter += 1;
+            if counter % 2 == 0 {
+                // Player 2's turn just finished
+                last_p2_state = state.clone();
+            } else {
+                last_p1_state = state.clone();
+            }
             state.swap_board();
             info!(">>>>>>>>>>>>>>>>>");
         }
@@ -300,24 +373,17 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
 fn main() {
     env_logger::init().unwrap();
     info!("Hello, mancala!");
-    let matches = App::new("mancala")
-                          .setting(AppSettings::ColorAlways)
-                          .version("0.1")
-                          .author("Jason Knight <jason@jasonknight.usm>")
-                          .about("Teachs an AI to play Mancala with reinforcement learning")
-                          .args_from_usage(
-                              "<NUM_RUNS>           'Number of rounds of gameplay to simulate'")
-                          // .subcommand(SubCommand::with_name("test")
-                          //             .about("controls testing features")
-                          //             .version("1.3")
-                          //             .author("Someone E. <someone_else@other.com>")
-                          //             .arg_from_usage("-d, --debug 'Print debug information'"))
-                          .get_matches();
+    let args: Args = Docopt::new(USAGE)
+                            .and_then(|d| d.decode())
+                            .unwrap_or_else(|e| e.exit());
 
 
     let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
-    let num_runs = matches.value_of("NUM_RUNS").unwrap().parse::<usize>().expect("Not an integer");
-    sarsa_loop(&mut value_fun, 0.01, 0.9, num_runs);
+    sarsa_loop(&mut value_fun,
+               args.flag_epsilon,
+               args.flag_learning_rate,
+               args.flag_discount_rate,
+               args.flag_num_runs);
 
     let mut qvals: Vec<_> = value_fun.values().collect();
     qvals.sort_by(|a, b| b.partial_cmp(a).unwrap());
