@@ -70,7 +70,6 @@ impl GameState {
         let p2_tot: u8 = self.houses[7..13].iter().sum();
         if p1_tot == 0 || p2_tot == 0 {
             return true;
-            info!("Checking if game is ended: Yes!");
         }
         info!("Checking if game is ended: no... {}, {}", p1_tot, p2_tot);
         return false;
@@ -297,20 +296,45 @@ mod test {
     }
 }
 
+fn dump_counter_stats(lens: &Vec<usize>, header_only: bool) {
+
+    let buckets = vec![0,5,10,15,20,25,30,45,50,60,70,80,90,100];
+    if header_only {
+        for buc in buckets.iter() {
+            print!("[{:5}] ", buc);
+        }
+        println!("");
+        return;
+    }
+    let mut counts = Vec::new();
+
+    for i in 1..buckets.len() {
+        let count = lens.iter()
+                        .filter(|val| **val < buckets[i] && **val >= buckets[i-1])
+                        .count();
+        counts.push(count);
+    }
+    for count in counts.iter() {
+        print!("{:7} ", count);
+    }
+    println!("");
+}
+
 fn sarsa_loop(values: &mut HashMap<GameState, f64>,
               epsilon: f64,
               learning_rate: f64,
               discount_factor: f64,
               episodes: usize) {
     let default_state_val = 0.5f64;
-    let mut q_prev = 0.0;
-    let mut q_next = 0.0;
-    let mut action = Action::new();
+    let mut q_prev: f64;
+    let mut q_next: f64;
+    let mut action: Action;
+    let mut game_lengths = Vec::with_capacity(episodes);
+    dump_counter_stats(&game_lengths, true);
     
-    for _ in 0..episodes {
+    for episode in 0..episodes {
         let mut last_p1_state = GameState::new(4);
         let mut last_p2_state = GameState::new(4);
-        let mut last_state = GameState::new(4);
         let mut state = GameState::new(4);
         info!("");
         info!("");
@@ -319,55 +343,66 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
         info!(">>>>>>>>>>>>>>>>>");
         let mut counter = 0;
         loop {
-            info!("Turn {}", counter);
-            last_state = if counter % 2 == 0 { last_p1_state } else { last_p2_state };
+            let players_turn = if counter % 2 == 0 { 1 } else { 2 };
+            let last_state = if players_turn == 1 { last_p1_state } else { last_p2_state };
+            info!("Turn {}, player {}'s turn", counter, players_turn);
             {
                 q_prev = *values.get(&last_state).unwrap_or(&default_state_val);
-                let tup = state.pick_action(epsilon, values);
-                action = tup.0;
-                q_next = tup.1;
+                if players_turn == 2 {
+                    let tup = state.pick_action(epsilon, values);
+                    action = tup.0;
+                    q_next = tup.1;
+                } else {
+                    let tup = state.pick_action(epsilon, values);
+                    action = tup.0;
+                    q_next = tup.1;
+                }
+                // action = tup.0;
+                // q_next = tup.1;
             }
-            let score_diff = state.houses[6] as f64 - state.houses[13] as f64;
-            info!("State: \n{}", state);
+            info!("State before action: \n{}", state);
             info!("Action: {}", action);
             state.evaluate_action(action);
-            // let reward = (state.houses[6] as f64 - state.houses[13] as f64) - score_diff;
-            // FIXME: noop
-            let reward = if state.is_ended() { 0 } else { 0 };
-            info!("Reward: {}, score_diff: {}", reward, score_diff);
+            trace!("State after action: \n{}", state);
             {
-                let q_ref = values.entry(state).or_insert(default_state_val);
-                *q_ref += learning_rate * (reward as f64 + discount_factor * q_next - q_prev);
-                info!("q_ref += learning_rate * (reward + discount_factor * q_next - q_prev)\n\
-                    {} += {} * ({} + {} * {} - {})",
-                    *q_ref, learning_rate, reward, discount_factor, q_next, q_prev);
+                let q_ref = values.entry(last_state).or_insert(default_state_val);
+                *q_ref += learning_rate * (discount_factor * q_next - q_prev);
+                info!("q_ref += learning_rate * (discount_factor * q_next - q_prev)\n\
+                    {} += {} * ({} * {} - {})",
+                    *q_ref, learning_rate, discount_factor, q_next, q_prev);
             }
             if state.is_ended() {
-
-                info!("Game ended at state:");
-                info!("{}", state);
-                counter += 1;
-                if counter % 2 == 0 {
-                    // Player 2's turn just finished
-                    *values.entry(last_p2_state).or_insert(default_state_val) = 1.0;
-                    *values.entry(last_p1_state).or_insert(default_state_val) = -1.0;
-                } else {
+                info!("Game ended at state:\n{}", state);
+                let curr_player_win = state.houses[6] > state.houses[13];
+                let tie = state.houses[6] == state.houses[13];
+                if curr_player_win && players_turn == 1 || !curr_player_win && players_turn == 2 {
+                    trace!("P1 win");
                     *values.entry(last_p1_state).or_insert(default_state_val) = 1.0;
                     *values.entry(last_p2_state).or_insert(default_state_val) = -1.0;
+                } else if !tie {
+                    trace!("P2 win");
+                    *values.entry(last_p2_state).or_insert(default_state_val) = 1.0;
+                    *values.entry(last_p1_state).or_insert(default_state_val) = -1.0;
                 }
+                counter += 1;
+                game_lengths.push(counter);
                 break;
             }
-            counter += 1;
-            if counter % 2 == 0 {
-                // Player 2's turn just finished
-                last_p2_state = state.clone();
-            } else {
+            if players_turn == 1 {
                 last_p1_state = state.clone();
+            } else {
+                last_p2_state = state.clone();
             }
+            counter += 1;
             state.swap_board();
             info!(">>>>>>>>>>>>>>>>>");
         }
+        if (episode+1) % 10000 == 0 {
+            dump_counter_stats(&game_lengths, false);
+            game_lengths.clear();
+        }
     }
+    dump_counter_stats(&game_lengths, false);
 }
     
 fn main() {
@@ -385,22 +420,22 @@ fn main() {
                args.flag_discount_rate,
                args.flag_num_runs);
 
-    let mut qvals: Vec<_> = value_fun.values().collect();
-    qvals.sort_by(|a, b| b.partial_cmp(a).unwrap());
-    println!("Some top values from value_fun:");
-    for val in &qvals[..10] {
-        println!("\t{}", val);
-    }
+    // let mut qvals: Vec<_> = value_fun.values().collect();
+    // qvals.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    // println!("Some top values from value_fun:");
+    // for val in &qvals[..10] {
+    //     println!("\t{}", val);
+    // }
     println!("Number of entries in value function: {}", value_fun.len());
 
-    let mut vals = value_fun.iter().collect::<Vec<_>>();
-    vals.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
-    println!("Here's a few of the top values and states:");
-    for pair in vals.iter().take(5) {
-        println!("\n#########\n{}:\n", pair.1);
-        println!("{}", pair.0);
-        // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
-        // println!("serialized = {}", serialized);
-    }
+    // let mut vals = value_fun.iter().collect::<Vec<_>>();
+    // vals.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+    // println!("Here's a few of the top values and states:");
+    // for pair in vals.iter().take(5) {
+    //     println!("\n#########\n{}:\n", pair.1);
+    //     println!("{}", pair.0);
+    //     // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
+    //     // println!("serialized = {}", serialized);
+    // }
 
 }
