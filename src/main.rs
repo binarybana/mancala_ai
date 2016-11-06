@@ -144,7 +144,10 @@ impl GameState {
     // }
 
     fn gen_actions(&self) -> ActionIter {
-        ActionIter{ next_subaction: 0, state: &self }
+        ActionIter{ next_action: Action::new(),
+                    base_state: &self,
+                    state_stack: Vec::new()
+                  }
     }
 
     fn pick_action(self, epsilon: f64, values: &ValueFunction) -> (Action, f64) {
@@ -181,17 +184,53 @@ impl GameState {
             self.houses[n/2+i] = temp;
         }
     }
+
+    fn find_next_subaction(&self, search_start: Subaction) -> Option<SubAction> {
+        for index in search_start..6 {
+            if self.houses[index as usize] > 0 {
+                Some(index)
+            }
+        }
+        None
+    }
 }
 
 struct ActionIter<'a> {
-    next_subaction: SubAction,
-    state: &'a GameState
+    next_action: Action,
+    base_state: &'a GameState,
+    state_stack: Vec<GameState>,
+}
+
+impl ActionIter<'a> {
+    /// Assuming that this ActionIter has been fully initialized, find the 
+    /// next action to take
+    fn set_next_action(&mut self) {
+        // I think this should be working correctly
+        loop {
+            let curr_state = if state_stack.is_empty() { base_state } 
+                             else { state_stack[state_stack.length()-1] };
+            let prev_subaction = self.next_action.pop_action();
+            if let Some(sub) = curr_state.find_next_subaction(prev_subaction+1) {
+                self.next_action.push_action(sub);
+                if state.is_capture_subaction(sub) { // need to make sure we explore this state more
+                    self.state_stack.push(curr_state.evaluate_to_new_state(sub));
+                } 
+                break; // we found a valid subaction for this curr_state
+            } else { // no more subactions in this state
+                if state_stack.is_empty() { // all done
+                    assert(self.next_action.is_empty());
+                    break;
+                } else { // try the next parent subaction
+                    state_stack.pop();
+                }
+            }
+        }
+    }
 }
 
 impl<'a> Iterator for ActionIter<'a> {
     type Item = Action;
     fn next(&mut self) -> Option<Action> {
-        // TODO: this is without multiple subturns when capturing
         let mut action = Action::new();
         for index in self.next_subaction..6 {
             if self.state.houses[index as usize] > 0 {
@@ -203,30 +242,44 @@ impl<'a> Iterator for ActionIter<'a> {
             }
         }
         return None;
+        /////////////////////
+        /////////////////////
+        /////////////////////
 
-        // An early attempt at the full capturing, multiple sub-turn dynamics:
-        // if captured
-        // if !self.action.is_empty() {
-        //     // find next subaction and return
-        //     // or pop and keep searching?
-        //     self.action.push_action(self.next_valid_submove)
-        //     // }
-        // } else {
-        //     something
-        //
-        // }
-        // // TODO:
-        // // use action to update a `copy` of self.state
-        // // TODO: 
-        // // check to see if we captured
-        // // if so, then grab self.state.next_valid_move() and append it to self.next_action
-        // if self.next_action < 6 {
-        //     self.next_action += 1;
-        //     Some(self.next_action-1)
-        // } else {
-        //     None
-        // }
-    }
+        //  TODO THIS IS ALL BUSTED
+        // Full capturing with multiple sub-turn dynamics:
+        if self.next_action.is_empty() {
+            // find next two actions and return the first and store the 
+            // second in self.next_action
+            let mut curr_action = Action::new();
+            for index in 0..6 {
+                let seeds = self.base_state.houses[index];
+                if seeds > 0 {
+                    if curr_action.is_empty() {
+                        curr_action.push_action(index as u8);
+                        if seeds + index as u8 == 6 { // multi turn
+                            let new_state = self.base_state.evaluate_to_new_state(curr_action);
+                            self.state_stack.push(new_state);
+                            match new_state.find_next_subaction() {
+                                Some(sub) => something,
+                                None => something
+                            }
+
+                        } else { // single turn
+                        }
+                    }
+                }
+            }
+        } else { // iterator already setup
+            if self.next_action.is_empty() {
+                return None
+            }
+            let ret_val = self.next_action;
+            if self.next_action.is_some() {
+                self.set_next_action();
+            }
+            return Some(ret_val);
+        }
 }
 
 impl Display for GameState {
