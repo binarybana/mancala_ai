@@ -134,17 +134,13 @@ impl GameState {
         }
     }
 
-    // fn next_valid_submove(&self) -> Option<SubAction> {
-    //     for house in &self.houses[0..6] {
-    //         if self.houses[*house as usize] > 0 {
-    //             return Some(*house as SubAction);
-    //         }
-    //     }
-    //     return None;
-    // }
+    /// Determine if subaction is 'renewing' and grants another turn
+    fn is_renewing_subaction(&self, sub: SubAction) -> bool {
+        self.houses[sub as usize] + sub == 6
+    }
 
     fn gen_actions(&self) -> ActionIter {
-        ActionIter{ next_action: Action::new(),
+        ActionIter{ action: Action::new(),
                     base_state: &self,
                     state_stack: Vec::new()
                   }
@@ -185,10 +181,10 @@ impl GameState {
         }
     }
 
-    fn find_next_subaction(&self, search_start: Subaction) -> Option<SubAction> {
+    fn find_next_subaction(&self, search_start: SubAction) -> Option<SubAction> {
         for index in search_start..6 {
             if self.houses[index as usize] > 0 {
-                Some(index)
+                return Some(index)
             }
         }
         None
@@ -196,90 +192,74 @@ impl GameState {
 }
 
 struct ActionIter<'a> {
-    next_action: Action,
+    action: Action,
     base_state: &'a GameState,
     state_stack: Vec<GameState>,
 }
 
-impl ActionIter<'a> {
-    /// Assuming that this ActionIter has been fully initialized, find the 
-    /// next action to take
-    fn set_next_action(&mut self) {
-        // I think this should be working correctly
-        loop {
-            let curr_state = if state_stack.is_empty() { base_state } 
-                             else { state_stack[state_stack.length()-1] };
-            let prev_subaction = self.next_action.pop_action();
-            if let Some(sub) = curr_state.find_next_subaction(prev_subaction+1) {
-                self.next_action.push_action(sub);
-                if state.is_capture_subaction(sub) { // need to make sure we explore this state more
-                    self.state_stack.push(curr_state.evaluate_to_new_state(sub));
-                } 
-                break; // we found a valid subaction for this curr_state
-            } else { // no more subactions in this state
-                if state_stack.is_empty() { // all done
-                    assert(self.next_action.is_empty());
-                    break;
-                } else { // try the next parent subaction
-                    state_stack.pop();
-                }
-            }
-        }
-    }
-}
 
 impl<'a> Iterator for ActionIter<'a> {
     type Item = Action;
     fn next(&mut self) -> Option<Action> {
-        let mut action = Action::new();
-        for index in self.next_subaction..6 {
-            if self.state.houses[index as usize] > 0 {
-                info!("Pushing subaction of {} because there are {} seeds there",
-                      index, self.state.houses[index as usize]);
-                action.push_action(index);
-                self.next_subaction = index + 1;
-                return Some(action);
+        // 1. iterate over subactions and pick valid ones
+        // 2. traverse into renewing subactions and go back to 1.
+        let mut next_subaction: Option<SubAction>;
+        let mut curr_state: GameState;
+        trace!("Beginning ActionIter.next");
+        loop {
+            curr_state = if self.state_stack.is_empty() { *self.base_state } 
+                             else { self.state_stack[self.state_stack.len()-1] };
+            trace!("curr_state: \n{}", curr_state);
+                             
+            // SETUP/Traverse current level
+            if self.action.is_empty() { // need to initialize search
+                next_subaction = curr_state.find_next_subaction(0);
+                trace!("self.action was empty, initializing search and found next_subaction: {:?}", next_subaction);
+            } else {
+                trace!("self.action has value {}, finding next subaction", self.action);
+                let prev_subaction = self.action.pop_action();
+                next_subaction = curr_state.find_next_subaction(prev_subaction+1);
+                trace!("popped subaction {} off self.action, found next_subaction: {:?}", prev_subaction, next_subaction);
             }
-        }
-        return None;
-        /////////////////////
-        /////////////////////
-        /////////////////////
-
-        //  TODO THIS IS ALL BUSTED
-        // Full capturing with multiple sub-turn dynamics:
-        if self.next_action.is_empty() {
-            // find next two actions and return the first and store the 
-            // second in self.next_action
-            let mut curr_action = Action::new();
-            for index in 0..6 {
-                let seeds = self.base_state.houses[index];
-                if seeds > 0 {
-                    if curr_action.is_empty() {
-                        curr_action.push_action(index as u8);
-                        if seeds + index as u8 == 6 { // multi turn
-                            let new_state = self.base_state.evaluate_to_new_state(curr_action);
-                            self.state_stack.push(new_state);
-                            match new_state.find_next_subaction() {
-                                Some(sub) => something,
-                                None => something
-                            }
-
-                        } else { // single turn
-                        }
+            if let Some(sub) = next_subaction { // another subaction at this state 'level'
+                self.action.push_action(sub);
+                trace!("Found sub of {}, pushed onto action to make: {}", sub, self.action);
+                if curr_state.is_renewing_subaction(sub) {
+                    curr_state.evaluate_subaction(sub);
+                }
+                while curr_state.is_renewing_subaction(sub) {
+                    trace!("Was a renewing subaction! Pushing new state onto stack");
+                    trace!("Going on DFS to find another terminal state");
+                    // traverse deeper by:
+                    // find next sub
+                    if let Some(sub) = curr_state.find_next_subaction(sub+1) {
+                        // push sub to action stack
+                        self.action.push_action(sub);
+                        // update curr_state
+                        curr_state.evaluate_subaction(sub);
+                        // append state to stack
+                        self.state_stack.push(curr_state);
+                    } else {
+                        break;
                     }
                 }
+                // now we are at a terminal state
+                trace!("Breaking out of loop because we found a valid action {} to return", self.action);
+                break; // we found a valid action for this curr_state
+            } else { // no more subactions in this state
+                trace!("Couldn't find any subactions here");
+                if self.state_stack.is_empty() { // all done
+                    trace!("All done");
+                    assert!(self.action.is_empty());
+                    return None;
+                } else { // try the next parent subaction
+                    trace!("Popping stack");
+                    self.state_stack.pop();
+                }
             }
-        } else { // iterator already setup
-            if self.next_action.is_empty() {
-                return None
-            }
-            let ret_val = self.next_action;
-            if self.next_action.is_some() {
-                self.set_next_action();
-            }
-            return Some(ret_val);
         }
+        Some(self.action)
+    }
 }
 
 impl Display for GameState {
@@ -310,16 +290,21 @@ mod test {
     use super::*;
     use packed_actions::*;
     use std::collections::HashMap;
+    extern crate env_logger;
 
     #[test]
     fn test_action_iter() {
+        let _ = env_logger::init();
         let state = GameState::new(4);
         let mut action = Action::new();
-        for (subaction, state_action) in (0..6).zip(state.gen_actions()) {
-            action.push_action(subaction);
-            assert_eq!(action, state_action);
-            action.pop_action();
+        for state_action in state.gen_actions() {
+            println!("{}", state_action);
         }
+        // for (subaction, state_action) in (0..6).zip(state.gen_actions()) {
+        //     action.push_action(subaction);
+        //     assert_eq!(action, state_action);
+        //     action.pop_action();
+        // }
     }
 
     #[test]
