@@ -75,6 +75,14 @@ impl GameState {
         return false;
     }
 
+    /// Move other players seeds to their house after a game ends
+    fn finalize_game(&mut self) {
+        for i in 7..13 {
+            self.houses[13] += self.houses[i];
+            self.houses[i] = 0;
+        }
+    }
+
     /// Return a new game state when playing out a sequence of actions (a string of capturing
     /// moves)
     fn evaluate_to_new_state(&self, action_list: Action) -> GameState {
@@ -103,8 +111,16 @@ impl GameState {
         self.houses[action] = 0;
         let end_house = action+seeds % 14;
         // Deposit seeds in each house around the board
+        // Offset is to handle skipping of the opponents
+        // scoring house as we go around the loop
+        let mut offset = 0;
         for i in action+1..end_house+1 {
-            self.houses[i%14] += 1;
+            if i > 0 && i % 13 == 0 {
+                self.houses[0] += 1;
+                offset += 1;
+            } else {
+                self.houses[(i+offset)%14] += 1;
+            }
         }
         // Capture rule
         if end_house < 6 && self.houses[end_house] == 1 {
@@ -254,6 +270,33 @@ mod test {
     }
 
     #[test]
+    fn test_evaluate_actions() {
+        let mut state = GameState::new(0);
+        let action = Action::singleton(4);
+        state.houses[4] = 10;
+        state.evaluate_action(action);
+        for i in 5..13 {
+            assert_eq!(state.houses[i], 1);
+        }
+        assert_eq!(state.houses[13], 0);
+        assert_eq!(state.houses[0], 1);
+        assert_eq!(state.houses[1], 1);
+        assert_eq!(state.houses[2], 0);
+        assert_eq!(state.houses[3], 0);
+        assert_eq!(state.houses[4], 0);
+    }
+
+    #[test]
+    fn test_capture_rules() {
+        let mut state = GameState::new(4);
+        state.houses[4] = 0;
+        let action = Action::singleton(0);
+        state.evaluate_action(action);
+        let expected: [u8; 14] = [0,5,5,5,0,4, 5, 4,0,4,4,4,4, 0];
+        assert_eq!(state.houses, expected);
+    }
+
+    #[test]
     fn pick_actions() {
         let mut value_fun: HashMap<GameState, f64> = HashMap::new();
         let mut state = GameState::new(4);
@@ -280,6 +323,20 @@ mod test {
             }
         }
         assert_eq!(mut_flag, true);
+    }
+    
+    #[test]
+    fn test_finalize_game() {
+        let mut state = GameState::new(4);
+        state.finalize_game();
+        assert_eq!(state.houses[13], 4*6);
+        for i in 7..13 {
+            assert_eq!(state.houses[i], 0);
+        }
+        for i in 0..6 {
+            assert_eq!(state.houses[i], 4);
+        }
+        assert_eq!(state.houses[6], 0);
     }
 
     #[test]
@@ -373,6 +430,7 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             }
             if state.is_ended() {
                 info!("Game ended at state:\n{}", state);
+                state.finalize_game();
                 let curr_player_win = state.houses[6] > state.houses[13];
                 let tie = state.houses[6] == state.houses[13];
                 if curr_player_win && players_turn == 1 || !curr_player_win && players_turn == 2 {
