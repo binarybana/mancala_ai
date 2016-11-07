@@ -1,11 +1,19 @@
 // #![feature(proc_macro)]
 // #[macro_use]
 // extern crate serde_derive;
+extern crate bincode;
+extern crate rustc_serialize;
+
+use bincode::SizeLimit;
+use bincode::rustc_serialize::{encode, decode};
+
+use std::fs::File;
+use std::io::{Read, Write};
+
 // extern crate serde_json;
 // extern crate clap;
 // use clap::{Arg, App, SubCommand, AppSettings};
 
-extern crate rustc_serialize;
 extern crate docopt;
 
 use docopt::Docopt;
@@ -14,7 +22,8 @@ const USAGE: &'static str = "
 Mancala AI using reinforcement learning.
 
 Usage:
-  mancala [--num-runs=<num-runs>] [--learning-rate=<a>] [--discount-rate=<g>] [--epsilon=<epsilon>]
+  mancala train [--num-runs=<num-runs>] [--learning-rate=<a>] [--discount-rate=<g>] [--epsilon=<epsilon>] [--train=<train>]
+  mancala play [--train=<train>]
   mancala (-h | --help)
   mancala --version
 
@@ -25,6 +34,7 @@ Options:
   --epsilon=<epsilon>    Epsilon for non-greedy actions [default: 0.02].
   --learning-rate=<a>    Learning rate [default: 0.05].
   --discount-rate=<g>    Discount rate [default: 1.0].
+  --train=<train>        Output/input training datafile.
 ";
 
 #[derive(Debug, RustcDecodable)]
@@ -33,6 +43,9 @@ struct Args {
     flag_epsilon: f64,
     flag_learning_rate: f64,
     flag_discount_rate: f64,
+    flag_train: Option<String>,
+    cmd_train: bool,
+    cmd_play: bool,
 }
 
 
@@ -48,9 +61,7 @@ use std::fmt::{self, Formatter, Display};
 mod packed_actions;
 use packed_actions::{Action, SubAction, ActionQueue};
 
-// #[derive(Serialize, Deserialize, Debug,
-#[derive(Debug,
-         Eq, PartialEq, Hash, Copy, Clone)]
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone, RustcDecodable, RustcEncodable)]
 pub struct GameState {
     houses: [u8; 14],
 }
@@ -542,36 +553,47 @@ fn main() {
                             .and_then(|d| d.decode())
                             .unwrap_or_else(|e| e.exit());
 
+    if args.cmd_train {
+        let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
+        sarsa_loop(&mut value_fun,
+                   args.flag_epsilon,
+                   args.flag_learning_rate,
+                   args.flag_discount_rate,
+                   args.flag_num_runs);
 
-    let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
-    sarsa_loop(&mut value_fun,
-               args.flag_epsilon,
-               args.flag_learning_rate,
-               args.flag_discount_rate,
-               args.flag_num_runs);
+        // let mut qvals: Vec<_> = value_fun.values().collect();
+        // qvals.sort_by(|a, b| b.partial_cmp(a).unwrap());
+        // println!("Some top values from value_fun:");
+        // for val in &qvals[..10] {
+        //     println!("\t{}", val);
+        // }
+        println!("Number of entries in value function: {}", value_fun.len());
 
-    // let mut qvals: Vec<_> = value_fun.values().collect();
-    // qvals.sort_by(|a, b| b.partial_cmp(a).unwrap());
-    // println!("Some top values from value_fun:");
-    // for val in &qvals[..10] {
-    //     println!("\t{}", val);
-    // }
-    println!("Number of entries in value function: {}", value_fun.len());
-
-    // let mut vals = value_fun.iter().collect::<Vec<_>>();
-    // vals.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
-    // println!("Here's a few of the top values and states:");
-    // for pair in vals.iter().take(5) {
-    //     println!("\n#########\n{}:\n", pair.1);
-    //     println!("{}", pair.0);
-    //     // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
-    //     // println!("serialized = {}", serialized);
-    // }
-    for first_move in 0..6 {
-        let mut state = GameState::new(4);
-        let action = Action::singleton(first_move);
-        state.evaluate_action(action);
-        println!("{}qval: {:?}", state, value_fun.get(&state));
+        // let mut vals = value_fun.iter().collect::<Vec<_>>();
+        // vals.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+        // println!("Here's a few of the top values and states:");
+        // for pair in vals.iter().take(5) {
+        //     println!("\n#########\n{}:\n", pair.1);
+        //     println!("{}", pair.0);
+        //     // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
+        //     // println!("serialized = {}", serialized);
+        // }
+        for first_move in 0..6 {
+            let mut state = GameState::new(4);
+            let action = Action::singleton(first_move);
+            state.evaluate_action(action);
+            println!("{}qval: {:?}", state, value_fun.get(&state));
+        }
+        let encoded: Vec<u8> = encode(&value_fun, SizeLimit::Infinite).unwrap();
+        let mut f: File = File::create(args.flag_train.unwrap_or("train.dat".to_string())).unwrap();
+        f.write_all(&encoded).unwrap();
+        drop(f);
+    } else if args.cmd_play {
+        let mut f: File = File::open(args.flag_train.unwrap_or("train.dat".to_string())).unwrap();
+        let mut encoded = Vec::new();
+        f.read_to_end(&mut encoded).unwrap();
+        let value_fun: HashMap<GameState, f64> = decode(&encoded).unwrap();
+        println!("Number of values in hash: {}", value_fun.len());
     }
 
 }
