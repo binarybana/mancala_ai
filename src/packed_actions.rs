@@ -8,8 +8,12 @@ impl Display for Action {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let mut copy = self.clone();
         try!(write!(f, "(len: {}; ", self.length()));
+        let mut vals = Vec::new();
         while !copy.is_empty() {
-            try!(write!(f, "{},", copy.pop_action()));
+            vals.push(copy.pop_action());
+        }
+        for val in vals.iter().rev() {
+            try!(write!(f, "{},", val));
         }
         write!(f, ")")
     }
