@@ -43,10 +43,8 @@ impl ActionQueue for Action {
 
     fn pop_action(&mut self) -> SubAction {
         let len = self.length() as u32;
-        let shifts = (len-1)*3;
-        let pop_mask = (1 << (shifts)) - 1;
-        let popped_action = (self.0 & (7 << shifts)) >> shifts;
-        self.0 = (self.0 & pop_mask) // clear out top bits
+        let popped_action = self.0 & 7;
+        self.0 = (self.0 & 0xFFFF) >> 3
             | (len-1) << 16; // add new length bits
         popped_action as SubAction
     }
@@ -73,12 +71,12 @@ mod test {
         println!("{:?}", action_list);
         action_list.push_action(3);
         assert_eq!(action_list.0, 4<<3 | 3 | (2<<16));
-        assert_eq!(action_list.pop_action(), 4);
-        assert_eq!(action_list.0, 3 | (1<<16));
+        assert_eq!(action_list.pop_action(), 3);
+        assert_eq!(action_list.0, 4 | (1<<16));
         action_list.push_action(2);
         println!("{:?}", action_list);
-        assert_eq!(action_list.pop_action(), 3);
         assert_eq!(action_list.pop_action(), 2);
+        assert_eq!(action_list.pop_action(), 4);
         assert_eq!(action_list.0, 0);
         action_list.push_action(3);
         assert_eq!(action_list.0, 3 | (1<<16));
