@@ -248,6 +248,7 @@ impl<'a> Iterator for ActionIter<'a> {
             let curr_state = self.get_current_state();
             trace!("self.action was not empty: {}, finding next subaction", self.action);
             let prev_subaction = self.action.pop_action();
+            trace!("base_state: \n{}", self.base_state);
             trace!("curr_state: \n{}", curr_state);
             trace!("popped subaction {} off self.action", prev_subaction);
             if let Some(sub) = curr_state.find_next_subaction(prev_subaction+1) {
@@ -255,9 +256,8 @@ impl<'a> Iterator for ActionIter<'a> {
                 return Some(self.action);
             } else {
                 trace!("Couldn't find any subactions at state\n{}", curr_state);
-                if self.state_stack.is_empty() { // all done
+                if self.state_stack.is_empty() || curr_state.is_ended() { // all done
                     trace!("All done");
-                    assert!(self.action.is_empty());
                     return None;
                 } else { // try the next parent subaction
                     trace!("Popping stack");
@@ -302,7 +302,6 @@ mod test {
     fn test_action_iter() {
         let _ = env_logger::init();
         let state = GameState::new(4);
-        let mut action = Action::new();
         let actions = state.gen_actions().collect::<Vec<_>>();
         assert_eq!(actions.len(), 10);
         // (len: 1; 0,)
@@ -316,13 +315,10 @@ mod test {
         // (len: 1; 4,)
         // (len: 1; 5,)
 
-        let mut state = GameState::new(4);
         // setup two stage nested turn
+        let mut state = GameState::new(4);
         state.houses[3] = 2;
         let mut action = Action::new();
-        // for action in state.gen_actions() {
-        //     println!("{}", action);
-        // }
         let actions = state.gen_actions().collect::<Vec<_>>();
         assert_eq!(actions.len(), 13);
         // (len: 1; 0,)
@@ -338,6 +334,11 @@ mod test {
         // (len: 1; 3,)
         // (len: 1; 4,)
         // (len: 1; 5,)
+        let mut state = GameState::new(0);
+        state.houses[5] = 1;
+        state.houses[10] = 1;
+        let actions = state.gen_actions().collect::<Vec<_>>();
+        assert_eq!(actions.len(), 1);
     }
 
     #[test]
@@ -526,7 +527,7 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             state.swap_board();
             info!(">>>>>>>>>>>>>>>>>");
         }
-        if (episode+1) % 10000 == 0 {
+        if (episode+1) % 1000 == 0 {
             dump_counter_stats(&game_lengths, false);
             game_lengths.clear();
         }
@@ -566,5 +567,11 @@ fn main() {
     //     // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
     //     // println!("serialized = {}", serialized);
     // }
+    for first_move in 0..6 {
+        let mut state = GameState::new(4);
+        let action = Action::singleton(first_move);
+        state.evaluate_action(action);
+        println!("{}qval: {:?}", state, value_fun.get(&state));
+    }
 
 }
