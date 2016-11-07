@@ -197,57 +197,64 @@ struct ActionIter<'a> {
     state_stack: Vec<GameState>,
 }
 
+impl<'a> ActionIter<'a> {
+    fn get_current_state(&self) -> GameState {
+            if self.state_stack.is_empty() {
+                self.base_state.clone()
+            } else { 
+                self.state_stack[self.state_stack.len()-1]
+            }
+    }
+
+    /// With a valid first_sub SubAction, do a DFS to find a terminal state
+    fn next_terminal_state(&mut self, first_sub: SubAction) {
+        let mut search = Some(first_sub);
+        let mut curr_state = self.get_current_state();
+        while let Some(sub) = search {
+            trace!("Pushing subaction {} onto action {}", sub, self.action);
+            self.action.push_action(sub);
+            if curr_state.is_renewing_subaction(sub) {
+                trace!("Found renewing sub! pushing state and looking for new subaction");
+                curr_state.evaluate_subaction(sub);
+                self.state_stack.push(curr_state);
+                search = curr_state.find_next_subaction(0);
+            } else {
+                break;
+            }
+        }
+    }
+}
 
 impl<'a> Iterator for ActionIter<'a> {
     type Item = Action;
     fn next(&mut self) -> Option<Action> {
-        // 1. iterate over subactions and pick valid ones
-        // 2. traverse into renewing subactions and go back to 1.
-        let mut next_subaction: Option<SubAction>;
-        let mut curr_state: GameState;
+        // if action is empty: find terminal state and return
+        // else:
+        //   loop {
+        //      if subaction: find terminal state at that subaction; break
+        //      else: pop_action and pop_state
+        //   }
         trace!("Beginning ActionIter.next");
-        loop {
-            curr_state = if self.state_stack.is_empty() { *self.base_state } 
-                             else { self.state_stack[self.state_stack.len()-1] };
-            trace!("curr_state: \n{}", curr_state);
-                             
-            // SETUP/Traverse current level
-            if self.action.is_empty() { // need to initialize search
-                next_subaction = curr_state.find_next_subaction(0);
-                trace!("self.action was empty, initializing search and found next_subaction: {:?}", next_subaction);
-            } else {
-                trace!("self.action has value {}, finding next subaction", self.action);
-                let prev_subaction = self.action.pop_action();
-                next_subaction = curr_state.find_next_subaction(prev_subaction+1);
-                trace!("popped subaction {} off self.action, found next_subaction: {:?}", prev_subaction, next_subaction);
+        if self.action.is_empty() { // need to initialize search at terminal state
+            if let Some(sub) = self.base_state.find_next_subaction(0) {
+                trace!("self.action was empty, initializing search and found next_subaction: {:?}", sub);
+                trace!("Now calling `next_terminal_state`");
+                self.next_terminal_state(sub);
+                return Some(self.action);
             }
-            if let Some(sub) = next_subaction { // another subaction at this state 'level'
-                self.action.push_action(sub);
-                trace!("Found sub of {}, pushed onto action to make: {}", sub, self.action);
-                if curr_state.is_renewing_subaction(sub) {
-                    curr_state.evaluate_subaction(sub);
-                }
-                while curr_state.is_renewing_subaction(sub) {
-                    trace!("Was a renewing subaction! Pushing new state onto stack");
-                    trace!("Going on DFS to find another terminal state");
-                    // traverse deeper by:
-                    // find next sub
-                    if let Some(sub) = curr_state.find_next_subaction(sub+1) {
-                        // push sub to action stack
-                        self.action.push_action(sub);
-                        // update curr_state
-                        curr_state.evaluate_subaction(sub);
-                        // append state to stack
-                        self.state_stack.push(curr_state);
-                    } else {
-                        break;
-                    }
-                }
-                // now we are at a terminal state
-                trace!("Breaking out of loop because we found a valid action {} to return", self.action);
-                break; // we found a valid action for this curr_state
-            } else { // no more subactions in this state
-                trace!("Couldn't find any subactions here");
+            return None;
+        }
+        loop {
+            let curr_state = self.get_current_state();
+            trace!("self.action was not empty: {}, finding next subaction", self.action);
+            let prev_subaction = self.action.pop_action();
+            trace!("curr_state: \n{}", curr_state);
+            trace!("popped subaction {} off self.action", prev_subaction);
+            if let Some(sub) = curr_state.find_next_subaction(prev_subaction+1) {
+                self.next_terminal_state(sub);
+                return Some(self.action);
+            } else {
+                trace!("Couldn't find any subactions at state\n{}", curr_state);
                 if self.state_stack.is_empty() { // all done
                     trace!("All done");
                     assert!(self.action.is_empty());
@@ -258,7 +265,6 @@ impl<'a> Iterator for ActionIter<'a> {
                 }
             }
         }
-        Some(self.action)
     }
 }
 
@@ -297,14 +303,41 @@ mod test {
         let _ = env_logger::init();
         let state = GameState::new(4);
         let mut action = Action::new();
-        for state_action in state.gen_actions() {
-            println!("{}", state_action);
-        }
-        // for (subaction, state_action) in (0..6).zip(state.gen_actions()) {
-        //     action.push_action(subaction);
-        //     assert_eq!(action, state_action);
-        //     action.pop_action();
+        let actions = state.gen_actions().collect::<Vec<_>>();
+        assert_eq!(actions.len(), 10);
+        // (len: 1; 0,)
+        // (len: 1; 1,)
+        // (len: 2; 2,0,)
+        // (len: 2; 2,1,)
+        // (len: 2; 2,3,)
+        // (len: 2; 2,4,)
+        // (len: 2; 2,5,)
+        // (len: 1; 3,)
+        // (len: 1; 4,)
+        // (len: 1; 5,)
+
+        let mut state = GameState::new(4);
+        // setup two stage nested turn
+        state.houses[3] = 2;
+        let mut action = Action::new();
+        // for action in state.gen_actions() {
+        //     println!("{}", action);
         // }
+        let actions = state.gen_actions().collect::<Vec<_>>();
+        assert_eq!(actions.len(), 13);
+        // (len: 1; 0,)
+        // (len: 1; 1,)
+        // (len: 2; 2,0,)
+        // (len: 2; 2,1,)
+        // (len: 3; 2,3,0,)
+        // (len: 3; 2,3,1,)
+        // (len: 3; 2,3,4,)
+        // (len: 3; 2,3,5,)
+        // (len: 2; 2,4,)
+        // (len: 2; 2,5,)
+        // (len: 1; 3,)
+        // (len: 1; 4,)
+        // (len: 1; 5,)
     }
 
     #[test]
