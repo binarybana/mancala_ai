@@ -1,7 +1,7 @@
 use std::fmt::{self, Formatter, Display};
 
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
-pub struct Action(u32);
+pub struct Action(u64);
 pub type SubAction = u8;
 
 impl Display for Action {
@@ -23,10 +23,15 @@ pub trait ActionQueue {
     fn push_action(&mut self, action: SubAction);
     fn pop_action(&mut self) -> SubAction;
     fn is_empty(&self) -> bool;
-    fn length(&self) -> u16;
+    fn length(&self) -> u32;
     fn new() -> Self;
     fn singleton(subaction: u8) -> Self;
 }
+
+pub const MAX_LEN: u64 = 19;
+pub const LEN_OFFSET: u64 = 57;
+pub const VEC_MASK: u64 = 0x1ffffffffffffff;
+pub const VEC_EL_BITWIDTH: u64 = 3;
 
 impl ActionQueue for Action {
     fn new() -> Action {
@@ -41,20 +46,21 @@ impl ActionQueue for Action {
     
     fn push_action(&mut self, action: SubAction){
         assert!(action < 7);
-        let new_len = self.length() as u32 + 1u32;
-        self.0 = (self.0 & 0xFFFF) << 3 | action as u32 | new_len << 16;
+        let new_len = self.length() as u64 + 1u64;
+        assert!(new_len <= MAX_LEN);
+        self.0 = (self.0 & VEC_MASK) << VEC_EL_BITWIDTH | action as u64 | new_len << LEN_OFFSET;
     }
 
     fn pop_action(&mut self) -> SubAction {
-        let len = self.length() as u32;
+        let len = self.length() as u64;
         let popped_action = self.0 & 7;
-        self.0 = (self.0 & 0xFFFF) >> 3
-            | (len-1) << 16; // add new length bits
+        self.0 = (self.0 & VEC_MASK) >> VEC_EL_BITWIDTH
+            | (len-1) << LEN_OFFSET; // add new length bits
         popped_action as SubAction
     }
 
-    fn length(&self) -> u16 {
-        (self.0 >> 16) as u16
+    fn length(&self) -> u32 {
+        (self.0 >> LEN_OFFSET) as u32
     }
 
     fn is_empty(&self) -> bool {
@@ -71,18 +77,18 @@ mod test {
         let mut action_list: Action = Action::new();
         assert_eq!(action_list.0, 0);
         action_list.push_action(4);
-        assert_eq!(action_list.0, 4 | (1<<16));
+        assert_eq!(action_list.0, 4 | (1<<LEN_OFFSET));
         println!("{:?}", action_list);
         action_list.push_action(3);
-        assert_eq!(action_list.0, 4<<3 | 3 | (2<<16));
+        assert_eq!(action_list.0, 4<<3 | 3 | (2<<LEN_OFFSET));
         assert_eq!(action_list.pop_action(), 3);
-        assert_eq!(action_list.0, 4 | (1<<16));
+        assert_eq!(action_list.0, 4 | (1<<LEN_OFFSET));
         action_list.push_action(2);
         println!("{:?}", action_list);
         assert_eq!(action_list.pop_action(), 2);
         assert_eq!(action_list.pop_action(), 4);
         assert_eq!(action_list.0, 0);
         action_list.push_action(3);
-        assert_eq!(action_list.0, 3 | (1<<16));
+        assert_eq!(action_list.0, 3 | (1<<LEN_OFFSET));
     }
 }
