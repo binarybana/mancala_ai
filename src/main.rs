@@ -314,10 +314,6 @@ mod test {
         let _ = env_logger::init();
         let state = GameState::new(4);
         let actions = state.gen_actions().collect::<Vec<_>>();
-        for x in &actions {
-            println!("{}", x);
-        }
-        println!("");
         assert_eq!(actions.len(), 10);
         // (len: 1; 0,)
         // (len: 1; 1,)
@@ -333,11 +329,7 @@ mod test {
         // setup two stage nested turn
         let mut state = GameState::new(4);
         state.houses[3] = 2;
-        let mut action = Action::new();
         let actions = state.gen_actions().collect::<Vec<_>>();
-        for x in &actions {
-            println!("{}", x);
-        }
         assert_eq!(actions.len(), 13);
         // (len: 1; 0,)
         // (len: 1; 1,)
@@ -441,6 +433,19 @@ mod test {
         assert_eq!(state.houses[11], 0);
         assert_eq!(state.houses[12], 5);
     }
+
+    #[test]
+    fn test_player() {
+        let mut state = GameState::new(4);
+        let mut p1 = Player::new(state);
+        let mut value_fun: HashMap<GameState, f64> = HashMap::new();
+        let action = Action::singleton(4);
+        state.evaluate_action(action);
+        value_fun.insert(state, 10.0);
+
+        assert_eq!(p1.take_action(&value_fun, 0.0), action);
+        p1.td_update(&mut value_fun, 0.2, 0.3);
+    }
 }
 
 fn dump_counter_stats(lens: &Vec<usize>, header_only: bool) {
@@ -467,13 +472,48 @@ fn dump_counter_stats(lens: &Vec<usize>, header_only: bool) {
     println!("");
 }
 
+pub struct Player {
+    curr_state: GameState,
+    last_state: GameState,
+}
+
+const DEFAULT_STATE_VAL: f64 = 0.5f64;
+impl Player {
+    fn new(starting_state: GameState) -> Player {
+        Player { curr_state: starting_state.clone(),
+                 last_state: starting_state.clone() }
+    }
+
+    fn take_action(&mut self,
+                   values: &HashMap<GameState, f64>,
+                   epsilon: f64) -> Action {
+        let (action, _) = self.curr_state.pick_action(epsilon, values);
+        self.last_state = self.curr_state;
+        self.curr_state.evaluate_action(action);
+        action
+    }
+
+    fn td_update(&self,
+                 values: &mut HashMap<GameState, f64>,
+                 learning_rate: f64,
+                 discount_factor: f64) {
+        let q_next = *values.entry(self.curr_state).or_insert(DEFAULT_STATE_VAL);
+        let q_last = values.entry(self.last_state).or_insert(DEFAULT_STATE_VAL);
+        let q_tmp = *q_last; // just for printing
+        *q_last += learning_rate * (discount_factor * q_next - q_tmp);
+        info!("q_ref += learning_rate * (discount_factor * q_next - q_last)\n\
+            {} += {} * ({} * {} - {})",
+            *q_last, learning_rate, discount_factor, q_next, q_tmp);
+
+    }
+}
+
 fn sarsa_loop(values: &mut HashMap<GameState, f64>,
               starting_state: GameState,
               epsilon: f64,
               learning_rate: f64,
               discount_factor: f64,
               episodes: usize) {
-    let default_state_val = 0.5f64;
     let mut q_prev: f64;
     let mut q_next: f64;
     let mut action: Action;
@@ -495,7 +535,7 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             let last_state = if players_turn == 1 { last_p1_state } else { last_p2_state };
             info!("Turn {}, player {}'s turn", counter, players_turn);
             {
-                q_prev = *values.get(&last_state).unwrap_or(&default_state_val);
+                q_prev = *values.get(&last_state).unwrap_or(&DEFAULT_STATE_VAL);
                 if players_turn == 2 {
                     let tup = state.pick_action(epsilon, values);
                     action = tup.0;
@@ -513,7 +553,7 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             state.evaluate_action(action);
             trace!("State after action: \n{}", state);
             {
-                let q_ref = values.entry(last_state).or_insert(default_state_val);
+                let q_ref = values.entry(last_state).or_insert(DEFAULT_STATE_VAL);
                 *q_ref += learning_rate * (discount_factor * q_next - q_prev);
                 info!("q_ref += learning_rate * (discount_factor * q_next - q_prev)\n\
                     {} += {} * ({} * {} - {})",
@@ -526,16 +566,16 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
                 let curr_player_win = copy.houses[6] > copy.houses[13];
                 let tie = state.houses[6] == state.houses[13];
                 if curr_player_win {
-                    *values.entry(state).or_insert(default_state_val) = 1.0;
+                    *values.entry(state).or_insert(DEFAULT_STATE_VAL) = 1.0;
                     trace!("Setting value of 1.0 to state of \n{}", state);
                     state.swap_board();
-                    *values.entry(state).or_insert(default_state_val) = -1.0;
+                    *values.entry(state).or_insert(DEFAULT_STATE_VAL) = -1.0;
                     trace!("Setting value of -1.0 to state of \n{}", state);
                 } else if !tie {
-                    *values.entry(state).or_insert(default_state_val) = -1.0;
+                    *values.entry(state).or_insert(DEFAULT_STATE_VAL) = -1.0;
                     trace!("Setting value of -1.0 to state of \n{}", state);
                     state.swap_board();
-                    *values.entry(state).or_insert(default_state_val) = 1.0;
+                    *values.entry(state).or_insert(DEFAULT_STATE_VAL) = 1.0;
                     trace!("Setting value of 1.0 to state of \n{}", state);
                 }
                 trace!("Last p1 state: {}", last_p1_state);
