@@ -107,7 +107,7 @@ impl GameState {
         // TODO: make this a proper iterator
         // for each action in action_list
         loop {
-            let subaction = action_list.pop_action();
+            let subaction = action_list.pop_front();
             self.evaluate_subaction(subaction);
             if action_list.is_empty() { break; }
         }
@@ -223,7 +223,7 @@ impl<'a> ActionIter<'a> {
         let mut curr_state = self.get_current_state();
         while let Some(sub) = search {
             trace!("Pushing subaction {} onto action {}", sub, self.action);
-            self.action.push_action(sub);
+            self.action.push_front(sub);
             if curr_state.is_renewing_subaction(sub) {
                 trace!("Found renewing sub! pushing state and looking for new subaction");
                 curr_state.evaluate_subaction(sub);
@@ -243,7 +243,7 @@ impl<'a> Iterator for ActionIter<'a> {
         // else:
         //   loop {
         //      if subaction: find terminal state at that subaction; break
-        //      else: pop_action and pop_state
+        //      else: pop_back and pop_state
         //   }
         trace!("Beginning ActionIter.next");
         if self.action.is_empty() { // need to initialize search at terminal state
@@ -258,7 +258,7 @@ impl<'a> Iterator for ActionIter<'a> {
         loop {
             let curr_state = self.get_current_state();
             trace!("self.action was not empty: {}, finding next subaction", self.action);
-            let prev_subaction = self.action.pop_action();
+            let prev_subaction = self.action.pop_back();
             trace!("base_state: \n{}", self.base_state);
             trace!("curr_state: \n{}", curr_state);
             trace!("popped subaction {} off self.action", prev_subaction);
@@ -314,6 +314,10 @@ mod test {
         let _ = env_logger::init();
         let state = GameState::new(4);
         let actions = state.gen_actions().collect::<Vec<_>>();
+        for x in &actions {
+            println!("{}", x);
+        }
+        println!("");
         assert_eq!(actions.len(), 10);
         // (len: 1; 0,)
         // (len: 1; 1,)
@@ -331,6 +335,9 @@ mod test {
         state.houses[3] = 2;
         let mut action = Action::new();
         let actions = state.gen_actions().collect::<Vec<_>>();
+        for x in &actions {
+            println!("{}", x);
+        }
         assert_eq!(actions.len(), 13);
         // (len: 1; 0,)
         // (len: 1; 1,)
@@ -461,6 +468,7 @@ fn dump_counter_stats(lens: &Vec<usize>, header_only: bool) {
 }
 
 fn sarsa_loop(values: &mut HashMap<GameState, f64>,
+              starting_state: GameState,
               epsilon: f64,
               learning_rate: f64,
               discount_factor: f64,
@@ -473,9 +481,9 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
     dump_counter_stats(&game_lengths, true);
     
     for episode in 0..episodes {
-        let mut last_p1_state = GameState::new(4);
-        let mut last_p2_state = GameState::new(4);
-        let mut state = GameState::new(4);
+        let mut last_p1_state = starting_state;
+        let mut last_p2_state = starting_state;
+        let mut state = starting_state;
         info!("");
         info!("");
         info!("######################");
@@ -553,9 +561,15 @@ fn main() {
                             .and_then(|d| d.decode())
                             .unwrap_or_else(|e| e.exit());
 
+    let mut starting_state = GameState::new(0);
+    starting_state.houses[4] = 2;
+    starting_state.houses[5] = 2;
+    starting_state.houses[12] = 1;
+    println!("{}", starting_state);
     if args.cmd_train {
         let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
         sarsa_loop(&mut value_fun,
+                   starting_state,
                    args.flag_epsilon,
                    args.flag_learning_rate,
                    args.flag_discount_rate,
@@ -578,9 +592,12 @@ fn main() {
         //     // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
         //     // println!("serialized = {}", serialized);
         // }
-        for first_move in 0..6 {
-            let mut state = GameState::new(4);
-            let action = Action::singleton(first_move);
+
+        // for first_move in 0..6 {
+        //     let mut state = GameState::new(4);
+        for first_move in &[4,5] {
+            let mut state = starting_state;
+            let action = Action::singleton(*first_move as u8);
             state.evaluate_action(action);
             println!("{}qval: {:?}", state, value_fun.get(&state));
         }
