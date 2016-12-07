@@ -484,6 +484,12 @@ impl Player {
                  last_state: starting_state.clone() }
     }
 
+    fn opponent_plays(&mut self, action: Action) {
+        self.curr_state.swap_board();
+        self.curr_state.evaluate_action(action);
+        self.curr_state.swap_board();
+    }
+
     fn take_action(&mut self,
                    values: &HashMap<GameState, f64>,
                    epsilon: f64) -> Action {
@@ -521,8 +527,8 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
     dump_counter_stats(&game_lengths, true);
     
     for episode in 0..episodes {
-        let mut last_p1_state = starting_state;
-        let mut last_p2_state = starting_state;
+        let mut p1 = Player::new(starting_state);
+        let mut p2 = Player::new(starting_state);
         let mut state = starting_state;
         info!("");
         info!("");
