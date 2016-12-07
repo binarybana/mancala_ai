@@ -521,18 +521,25 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             }
             if state.is_ended() {
                 info!("Game ended at state:\n{}", state);
-                state.finalize_game();
-                let curr_player_win = state.houses[6] > state.houses[13];
+                let mut copy = state.clone();
+                copy.finalize_game();
+                let curr_player_win = copy.houses[6] > copy.houses[13];
                 let tie = state.houses[6] == state.houses[13];
-                if curr_player_win && players_turn == 1 || !curr_player_win && players_turn == 2 {
-                    trace!("P1 win");
-                    *values.entry(last_p1_state).or_insert(default_state_val) = 1.0;
-                    *values.entry(last_p2_state).or_insert(default_state_val) = -1.0;
+                if curr_player_win {
+                    *values.entry(state).or_insert(default_state_val) = 1.0;
+                    trace!("Setting value of 1.0 to state of \n{}", state);
+                    state.swap_board();
+                    *values.entry(state).or_insert(default_state_val) = -1.0;
+                    trace!("Setting value of -1.0 to state of \n{}", state);
                 } else if !tie {
-                    trace!("P2 win");
-                    *values.entry(last_p2_state).or_insert(default_state_val) = 1.0;
-                    *values.entry(last_p1_state).or_insert(default_state_val) = -1.0;
+                    *values.entry(state).or_insert(default_state_val) = -1.0;
+                    trace!("Setting value of -1.0 to state of \n{}", state);
+                    state.swap_board();
+                    *values.entry(state).or_insert(default_state_val) = 1.0;
+                    trace!("Setting value of 1.0 to state of \n{}", state);
                 }
+                trace!("Last p1 state: {}", last_p1_state);
+                trace!("Last p2 state: {}", last_p2_state);
                 counter += 1;
                 game_lengths.push(counter);
                 break;
@@ -583,15 +590,15 @@ fn main() {
         // }
         println!("Number of entries in value function: {}", value_fun.len());
 
-        // let mut vals = value_fun.iter().collect::<Vec<_>>();
-        // vals.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
-        // println!("Here's a few of the top values and states:");
-        // for pair in vals.iter().take(5) {
-        //     println!("\n#########\n{}:\n", pair.1);
-        //     println!("{}", pair.0);
-        //     // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
-        //     // println!("serialized = {}", serialized);
-        // }
+        let mut vals = value_fun.iter().collect::<Vec<_>>();
+        vals.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+        println!("Here's a few of the top values and states:");
+        for pair in vals.iter().take(5) {
+            println!("\n#########\n{}:\n", pair.1);
+            println!("{}", pair.0);
+            // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
+            // println!("serialized = {}", serialized);
+        }
 
         // for first_move in 0..6 {
         //     let mut state = GameState::new(4);
