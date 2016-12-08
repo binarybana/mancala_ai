@@ -520,83 +520,50 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
               learning_rate: f64,
               discount_factor: f64,
               episodes: usize) {
-    let mut q_prev: f64;
-    let mut q_next: f64;
-    let mut action: Action;
     let mut game_lengths = Vec::with_capacity(episodes);
     dump_counter_stats(&game_lengths, true);
     
     for episode in 0..episodes {
-        let mut p1 = Player::new(starting_state);
-        let mut p2 = Player::new(starting_state);
-        let mut state = starting_state;
-        info!("");
-        info!("");
-        info!("######################");
-        info!("######################");
+        let mut current_player = Player::new(starting_state);
+        let mut opposing_player = Player::new(starting_state);
         info!(">>>>>>>>>>>>>>>>>");
         let mut counter = 0;
         loop {
+            let action = current_player.take_action(values, epsilon);
+            opposing_player.opponent_plays(action);
+            current_player.td_update(values, learning_rate, discount_factor);
+
             let players_turn = if counter % 2 == 0 { 1 } else { 2 };
-            let last_state = if players_turn == 1 { last_p1_state } else { last_p2_state };
             info!("Turn {}, player {}'s turn", counter, players_turn);
-            {
-                q_prev = *values.get(&last_state).unwrap_or(&DEFAULT_STATE_VAL);
-                if players_turn == 2 {
-                    let tup = state.pick_action(epsilon, values);
-                    action = tup.0;
-                    q_next = tup.1;
-                } else {
-                    let tup = state.pick_action(epsilon, values);
-                    action = tup.0;
-                    q_next = tup.1;
-                }
-                // action = tup.0;
-                // q_next = tup.1;
-            }
-            info!("State before action: \n{}", state);
-            info!("Action: {}", action);
-            state.evaluate_action(action);
-            trace!("State after action: \n{}", state);
-            {
-                let q_ref = values.entry(last_state).or_insert(DEFAULT_STATE_VAL);
-                *q_ref += learning_rate * (discount_factor * q_next - q_prev);
-                info!("q_ref += learning_rate * (discount_factor * q_next - q_prev)\n\
-                    {} += {} * ({} * {} - {})",
-                    *q_ref, learning_rate, discount_factor, q_next, q_prev);
-            }
-            if state.is_ended() {
-                info!("Game ended at state:\n{}", state);
-                let mut copy = state.clone();
-                copy.finalize_game();
-                let curr_player_win = copy.houses[6] > copy.houses[13];
-                let tie = state.houses[6] == state.houses[13];
-                if curr_player_win {
-                    *values.entry(state).or_insert(DEFAULT_STATE_VAL) = 1.0;
-                    trace!("Setting value of 1.0 to state of \n{}", state);
-                    state.swap_board();
-                    *values.entry(state).or_insert(DEFAULT_STATE_VAL) = -1.0;
-                    trace!("Setting value of -1.0 to state of \n{}", state);
-                } else if !tie {
-                    *values.entry(state).or_insert(DEFAULT_STATE_VAL) = -1.0;
-                    trace!("Setting value of -1.0 to state of \n{}", state);
-                    state.swap_board();
-                    *values.entry(state).or_insert(DEFAULT_STATE_VAL) = 1.0;
-                    trace!("Setting value of 1.0 to state of \n{}", state);
-                }
-                trace!("Last p1 state: {}", last_p1_state);
-                trace!("Last p2 state: {}", last_p2_state);
+
+            if current_player.curr_state.is_ended() {
+                info!("Game ended at state:\n{}", current_player.curr_state);
+
+                // TODO: update for players
+                //
+                // let mut copy = state.clone();
+                // copy.finalize_game();
+                // let curr_player_win = copy.houses[6] > copy.houses[13];
+                // let tie = state.houses[6] == state.houses[13];
+                // if curr_player_win {
+                //     *values.entry(state).or_insert(DEFAULT_STATE_VAL) = 1.0;
+                //     trace!("Setting value of 1.0 to state of \n{}", state);
+                //     state.swap_board();
+                //     *values.entry(state).or_insert(DEFAULT_STATE_VAL) = -1.0;
+                //     trace!("Setting value of -1.0 to state of \n{}", state);
+                // } else if !tie {
+                //     *values.entry(state).or_insert(DEFAULT_STATE_VAL) = -1.0;
+                //     trace!("Setting value of -1.0 to state of \n{}", state);
+                //     state.swap_board();
+                //     *values.entry(state).or_insert(DEFAULT_STATE_VAL) = 1.0;
+                //     trace!("Setting value of 1.0 to state of \n{}", state);
+                // }
                 counter += 1;
                 game_lengths.push(counter);
                 break;
             }
-            if players_turn == 1 {
-                last_p1_state = state.clone();
-            } else {
-                last_p2_state = state.clone();
-            }
             counter += 1;
-            state.swap_board();
+            std::mem::swap(&mut current_player, &mut opposing_player);
             info!(">>>>>>>>>>>>>>>>>");
         }
         if (episode+1) % 1000 == 0 {
