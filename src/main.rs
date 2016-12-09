@@ -682,12 +682,13 @@ fn main() {
                             .and_then(|d| d.decode())
                             .unwrap_or_else(|e| e.exit());
 
-    let mut starting_state = GameState::new(0);
-    starting_state.houses[4] = 2;
-    starting_state.houses[5] = 2;
-    starting_state.houses[1] = 1;
-    starting_state.houses[10] = 1;
-    starting_state.houses[12] = 1;
+    let mut starting_state = GameState::new(2);
+    // let mut starting_state = GameState::new(0);
+    // starting_state.houses[4] = 2;
+    // starting_state.houses[5] = 2;
+    // starting_state.houses[1] = 1;
+    // starting_state.houses[10] = 1;
+    // starting_state.houses[12] = 1;
     println!("{}", starting_state);
     if args.cmd_train {
         let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
@@ -718,16 +719,17 @@ fn main() {
 
         // for first_move in 0..6 {
         //     let mut state = GameState::new(4);
-        let a0 = Action::singleton(1u8);
-        let mut a1 = Action::singleton(4u8);
-        a1.push_front(5u8);
-        let a2 = Action::singleton(5u8);
 
-        for action in &[a0, a1, a2] {
-            let mut state = starting_state;
-            state.evaluate_action(*action);
-            println!("{}qval: {:?}", state, value_fun.get(&state));
-        }
+        // let a0 = Action::singleton(1u8);
+        // let mut a1 = Action::singleton(4u8);
+        // a1.push_front(5u8);
+        // let a2 = Action::singleton(5u8);
+        //
+        // for action in &[a0, a1, a2] {
+        //     let mut state = starting_state;
+        //     state.evaluate_action(*action);
+        //     println!("{}qval: {:?}", state, value_fun.get(&state));
+        // }
         let encoded: Vec<u8> = encode(&value_fun, SizeLimit::Infinite).unwrap();
         let mut f: File = File::create(args.flag_train.unwrap_or("train.dat".to_string())).unwrap();
         f.write_all(&encoded).unwrap();
@@ -738,6 +740,21 @@ fn main() {
         f.read_to_end(&mut encoded).unwrap();
         let mut value_fun: HashMap<GameState, f64> = decode(&encoded).unwrap();
         println!("Number of values in hash: {}", value_fun.len());
+
+        // for first_move in 0..6 {
+        //     let mut state = GameState::new(4);
+
+        // let a0 = Action::singleton(1u8);
+        // let mut a1 = Action::singleton(4u8);
+        // a1.push_front(5u8);
+        // let a2 = Action::singleton(5u8);
+        //
+        for action in 0..6 {
+            let mut state = starting_state;
+            let action = Action::singleton(action as u8);
+            state.evaluate_action(action);
+            println!("{}qval: {:?}", state, value_fun.get(&state));
+        }
         play_loop(&mut value_fun, starting_state);
     }
 
