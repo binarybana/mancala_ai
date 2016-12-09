@@ -163,7 +163,10 @@ impl GameState {
             .map(|(action, possible_state)| (action, *values.get(&possible_state)
                                              .unwrap_or(&0.5f64)))
             .collect();
-        info!("Actions available to choose from: {:?}", choices);
+        info!("Actions available to choose from:");
+        for action in &choices {
+            info!("\t{}, {}", action.0, action.1);
+        }
         if choices.len() == 0 {
             println!("state: {}", self);
         }
@@ -437,7 +440,7 @@ mod test {
     #[test]
     fn test_player() {
         let mut state = GameState::new(4);
-        let mut p1 = Player::new(state);
+        let mut p1 = AIPlayer::new(state);
         let mut value_fun: HashMap<GameState, f64> = HashMap::new();
         let action = Action::singleton(4);
         state.evaluate_action(action);
@@ -472,19 +475,34 @@ fn dump_counter_stats(lens: &Vec<usize>, header_only: bool) {
     println!("");
 }
 
-pub struct Player {
+pub struct AIPlayer {
     curr_state: GameState,
     last_state: GameState,
 }
 
+
+pub trait Player {
+    fn new(starting_state: GameState) -> Self;
+    fn opponent_plays(&mut self, action: Action);
+    fn take_action(&mut self,
+                   values: &HashMap<GameState, f64>,
+                   epsilon: f64) -> Action;
+    fn td_update(&self,
+                 values: &mut HashMap<GameState, f64>,
+                 learning_rate: f64,
+                 discount_factor: f64);
+}
+
 const DEFAULT_STATE_VAL: f64 = 0.5f64;
-impl Player {
-    fn new(starting_state: GameState) -> Player {
-        Player { curr_state: starting_state.clone(),
+
+impl Player for AIPlayer {
+    fn new(starting_state: GameState) -> AIPlayer {
+        AIPlayer { curr_state: starting_state.clone(),
                  last_state: starting_state.clone() }
     }
 
     fn opponent_plays(&mut self, action: Action) {
+        self.last_state = self.curr_state;
         self.curr_state.swap_board();
         self.curr_state.evaluate_action(action);
         self.curr_state.swap_board();
@@ -494,8 +512,9 @@ impl Player {
                    values: &HashMap<GameState, f64>,
                    epsilon: f64) -> Action {
         let (action, _) = self.curr_state.pick_action(epsilon, values);
-        self.last_state = self.curr_state;
+        debug!("Picked action {} at state \n{}", action, self.curr_state);
         self.curr_state.evaluate_action(action);
+        debug!("Evaluated action {}, now at state\n{}", action, self.curr_state);
         action
     }
 
@@ -507,7 +526,10 @@ impl Player {
         let q_last = values.entry(self.last_state).or_insert(DEFAULT_STATE_VAL);
         let q_tmp = *q_last; // just for printing
         *q_last += learning_rate * (discount_factor * q_next - q_tmp);
-        info!("q_ref += learning_rate * (discount_factor * q_next - q_last)\n\
+        debug!("Doing TD update from (self.last_state) q_last:\n{}\n\
+               to (self.curr_state) q_next:\n{}",
+               self.last_state, self.curr_state);
+        debug!("q_last += learning_rate * (discount_factor * q_next - q_last)\n\
             {} += {} * ({} * {} - {})",
             *q_last, learning_rate, discount_factor, q_next, q_tmp);
 
@@ -520,58 +542,137 @@ fn sarsa_loop(values: &mut HashMap<GameState, f64>,
               learning_rate: f64,
               discount_factor: f64,
               episodes: usize) {
-    let mut game_lengths = Vec::with_capacity(episodes);
+    let print_rate = 1000;
+    let mut game_lengths = Vec::with_capacity(print_rate);
     dump_counter_stats(&game_lengths, true);
     
     for episode in 0..episodes {
-        let mut current_player = Player::new(starting_state);
-        let mut opposing_player = Player::new(starting_state);
+        let mut current_player = AIPlayer::new(starting_state);
+        let mut opposing_player = {
+            let mut opp_starting_state = starting_state.clone();
+            opp_starting_state.swap_board();
+            AIPlayer::new(opp_starting_state)
+        };
         info!(">>>>>>>>>>>>>>>>>");
         let mut counter = 0;
         loop {
-            let action = current_player.take_action(values, epsilon);
-            opposing_player.opponent_plays(action);
-            current_player.td_update(values, learning_rate, discount_factor);
-
             let players_turn = if counter % 2 == 0 { 1 } else { 2 };
             info!("Turn {}, player {}'s turn", counter, players_turn);
 
+            let action = current_player.take_action(values, epsilon);
+            opposing_player.opponent_plays(action);
+
             if current_player.curr_state.is_ended() {
                 info!("Game ended at state:\n{}", current_player.curr_state);
+                let (tie, curr_player_win) = {
+                    let mut copy = current_player.curr_state.clone();
+                    copy.finalize_game();
+                    let diff = copy.houses[6] as i32 - copy.houses[13] as i32;
+                    (diff == 0, diff > 0)
+                };
+                if curr_player_win {
+                    values.insert(current_player.curr_state, 1.0);
+                    values.insert(opposing_player.curr_state, 0.0);
+                } else if !tie {
+                    values.insert(current_player.curr_state, 0.0);
+                    values.insert(opposing_player.curr_state, 1.0);
+                }
+                // The only reason this duplication has to happen here is because
+                // we need to first set the terminal states to {1.0, 0.0}
+                // otherwise we could move these four lines before the is_ended check
+                // and remove the duplication
+                debug!("TD Update for current player");
+                current_player.td_update(values, learning_rate, discount_factor);
+                debug!("TD Update for opposing player");
+                opposing_player.td_update(values, learning_rate, discount_factor);
 
-                // TODO: update for players
-                //
-                // let mut copy = state.clone();
-                // copy.finalize_game();
-                // let curr_player_win = copy.houses[6] > copy.houses[13];
-                // let tie = state.houses[6] == state.houses[13];
-                // if curr_player_win {
-                //     *values.entry(state).or_insert(DEFAULT_STATE_VAL) = 1.0;
-                //     trace!("Setting value of 1.0 to state of \n{}", state);
-                //     state.swap_board();
-                //     *values.entry(state).or_insert(DEFAULT_STATE_VAL) = -1.0;
-                //     trace!("Setting value of -1.0 to state of \n{}", state);
-                // } else if !tie {
-                //     *values.entry(state).or_insert(DEFAULT_STATE_VAL) = -1.0;
-                //     trace!("Setting value of -1.0 to state of \n{}", state);
-                //     state.swap_board();
-                //     *values.entry(state).or_insert(DEFAULT_STATE_VAL) = 1.0;
-                //     trace!("Setting value of 1.0 to state of \n{}", state);
-                // }
                 counter += 1;
                 game_lengths.push(counter);
                 break;
             }
+            debug!("TD Update for current player");
+            current_player.td_update(values, learning_rate, discount_factor);
+            debug!("TD Update for opposing player");
+            opposing_player.td_update(values, learning_rate, discount_factor);
             counter += 1;
             std::mem::swap(&mut current_player, &mut opposing_player);
             info!(">>>>>>>>>>>>>>>>>");
         }
-        if (episode+1) % 1000 == 0 {
+        if (episode+1) % print_rate == 0 {
             dump_counter_stats(&game_lengths, false);
             game_lengths.clear();
         }
     }
     dump_counter_stats(&game_lengths, false);
+}
+
+pub struct HumanPlayer{
+    curr_state: GameState
+}
+
+impl Player for HumanPlayer {
+    fn new(starting_state: GameState) -> HumanPlayer {
+        HumanPlayer { curr_state: starting_state.clone() }
+    }
+
+    fn opponent_plays(&mut self, action: Action) {
+        self.curr_state.swap_board();
+        self.curr_state.evaluate_action(action);
+        self.curr_state.swap_board();
+    }
+
+    fn take_action(&mut self,
+                   values: &HashMap<GameState, f64>,
+                   epsilon: f64) -> Action {
+        let choices: Vec<Action> = self.curr_state.gen_actions()
+            .collect();
+        println!("Choose from these options:");
+        for (i, choice) in choices.iter().enumerate() {
+            println!("\t({}): {}", i, choice);
+        }
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).expect("Couldn't read stdin");
+        use std::str::FromStr;
+        let index = u8::from_str(&input.trim()).expect("Couldn't parse your input into an integer");
+        assert!(index as usize <= choices.len());
+
+        let action = choices[index as usize];
+        debug!("Picked action {} at state \n{}", action, self.curr_state);
+        self.curr_state.evaluate_action(action);
+        debug!("Evaluated action {}, now at state\n{}", action, self.curr_state);
+        action
+    }
+
+    fn td_update(&self,
+                 values: &mut HashMap<GameState, f64>,
+                 learning_rate: f64,
+                 discount_factor: f64) {}
+}
+
+
+fn play_loop(values: &mut HashMap<GameState, f64>,
+             starting_state: GameState) {
+    let mut current_player = HumanPlayer::new(starting_state);
+    let mut opposing_player = {
+        let mut opp_starting_state = starting_state.clone();
+        opp_starting_state.swap_board();
+        AIPlayer::new(opp_starting_state)
+    };
+    loop {
+        let action = current_player.take_action(values, 0.0);
+        opposing_player.opponent_plays(action);
+        println!("Computer goes. State now:\n{}", opposing_player.curr_state);
+        if current_player.curr_state.is_ended() {
+            break;
+        }
+        let action = opposing_player.take_action(values, 0.0);
+        current_player.opponent_plays(action);
+        if current_player.curr_state.is_ended() {
+            break;
+        }
+        println!("You went. State now:\n{}", opposing_player.curr_state);
+    }
+    println!("Game ended at state:\n{}", current_player.curr_state);
 }
     
 fn main() {
@@ -584,6 +685,8 @@ fn main() {
     let mut starting_state = GameState::new(0);
     starting_state.houses[4] = 2;
     starting_state.houses[5] = 2;
+    starting_state.houses[1] = 1;
+    starting_state.houses[10] = 1;
     starting_state.houses[12] = 1;
     println!("{}", starting_state);
     if args.cmd_train {
@@ -615,10 +718,14 @@ fn main() {
 
         // for first_move in 0..6 {
         //     let mut state = GameState::new(4);
-        for first_move in &[4,5] {
+        let a0 = Action::singleton(1u8);
+        let mut a1 = Action::singleton(4u8);
+        a1.push_front(5u8);
+        let a2 = Action::singleton(5u8);
+
+        for action in &[a0, a1, a2] {
             let mut state = starting_state;
-            let action = Action::singleton(*first_move as u8);
-            state.evaluate_action(action);
+            state.evaluate_action(*action);
             println!("{}qval: {:?}", state, value_fun.get(&state));
         }
         let encoded: Vec<u8> = encode(&value_fun, SizeLimit::Infinite).unwrap();
@@ -629,8 +736,9 @@ fn main() {
         let mut f: File = File::open(args.flag_train.unwrap_or("train.dat".to_string())).unwrap();
         let mut encoded = Vec::new();
         f.read_to_end(&mut encoded).unwrap();
-        let value_fun: HashMap<GameState, f64> = decode(&encoded).unwrap();
+        let mut value_fun: HashMap<GameState, f64> = decode(&encoded).unwrap();
         println!("Number of values in hash: {}", value_fun.len());
+        play_loop(&mut value_fun, starting_state);
     }
 
 }
