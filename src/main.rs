@@ -529,8 +529,8 @@ pub struct AIPlayer {
 
 
 pub trait Player {
-    fn new(starting_state: GameState) -> Self;
     fn opponent_plays(&mut self, action: Action);
+    fn current_state(&self) -> GameState;
     fn take_action(&mut self,
                    values: &HashMap<GameState, f64>,
                    epsilon: f64) -> Action;
@@ -542,12 +542,13 @@ pub trait Player {
 
 const DEFAULT_STATE_VAL: f64 = 0.5f64;
 
-impl Player for AIPlayer {
+impl AIPlayer {
     fn new(starting_state: GameState) -> AIPlayer {
         AIPlayer { curr_state: starting_state.clone(),
                  last_state: starting_state.clone() }
     }
-
+}
+impl Player for AIPlayer {
     fn opponent_plays(&mut self, action: Action) {
         self.last_state = self.curr_state;
         self.curr_state.swap_board();
@@ -580,6 +581,10 @@ impl Player for AIPlayer {
             {} += {} * ({} * {} - {})",
             *q_last, learning_rate, discount_factor, q_next, q_tmp);
 
+    }
+
+    fn current_state(&self) -> GameState {
+        self.curr_state
     }
 }
 
@@ -657,11 +662,13 @@ pub struct HumanPlayer{
     curr_state: GameState
 }
 
-impl Player for HumanPlayer {
+impl HumanPlayer {
     fn new(starting_state: GameState) -> HumanPlayer {
         HumanPlayer { curr_state: starting_state.clone() }
     }
+}
 
+impl Player for HumanPlayer {
     fn opponent_plays(&mut self, action: Action) {
         self.curr_state.swap_board();
         self.curr_state.evaluate_action(action);
@@ -669,8 +676,17 @@ impl Player for HumanPlayer {
     }
 
     fn take_action(&mut self,
-                   _: &HashMap<GameState, f64>,
+                   values: &HashMap<GameState, f64>,
                    _: f64) -> Action {
+        println!("Computer went. State now (from your perspective):\n{}", self.curr_state);
+        println!("\n----------------\n");
+        println!("Now considering your options: ");
+        for action in self.curr_state.gen_actions() {
+            let mut state = self.curr_state;
+            state.evaluate_action(action);
+            println!("\n----------------\n{}:\n{}\nqval: {:?}\n", action, state, values.get(&state));
+        }
+
         let choices: Vec<Action> = self.curr_state.gen_actions().collect();
         let index = loop {
             println!("Choose from these options:");
@@ -694,6 +710,7 @@ impl Player for HumanPlayer {
         debug!("Picked action {} at state \n{}", action, self.curr_state);
         self.curr_state.evaluate_action(action);
         debug!("Evaluated action {}, now at state\n{}", action, self.curr_state);
+        println!("You played. State now:\n{}", self.curr_state);
         action
     }
 
@@ -701,43 +718,28 @@ impl Player for HumanPlayer {
                  _: &mut HashMap<GameState, f64>,
                  _: f64,
                  _: f64) {}
+
+    fn current_state(&self) -> GameState {
+        self.curr_state
+    }
 }
 
 
-fn play_loop(values: &mut HashMap<GameState, f64>,
+fn play_loop(mut p1: Box<Player>, mut p2: Box<Player>,
+             values: &mut HashMap<GameState, f64>,
              starting_state: GameState) {
-    let mut current_player = HumanPlayer::new(starting_state);
-    let mut opposing_player = {
-        let mut opp_starting_state = starting_state.clone();
-        opp_starting_state.swap_board();
-        AIPlayer::new(opp_starting_state)
-    };
     println!("Starting play loop:");
-    println!("Starting state:\n{}", current_player.curr_state);
+    println!("Starting state:\n{}", p1.current_state());
     loop {
-        let action = current_player.take_action(values, 0.0);
-        opposing_player.opponent_plays(action);
-        println!("You played. State now:\n{}", current_player.curr_state);
-        if current_player.curr_state.is_ended() {
+        let action = p1.take_action(values, 0.0);
+        p2.opponent_plays(action);
+        if p1.current_state().is_ended() {
             break;
         }
-        let action = opposing_player.take_action(values, 0.0);
-        current_player.opponent_plays(action);
-        if opposing_player.curr_state.is_ended() {
-            break;
-        }
-        println!("Computer went {}. State now (from your perspective):\n{}", action, current_player.curr_state);
-        println!("\n----------------\n");
-        println!("Now considering your options: ");
-        for action in current_player.curr_state.gen_actions() {
-            let mut state = current_player.curr_state;
-            state.evaluate_action(action);
-            println!("\n----------------\n{}:\n{}\nqval: {:?}\n", action, state, values.get(&state));
-        }
-        println!("The current state now again (from your perspective):\n{}", current_player.curr_state);
+        std::mem::swap(&mut p1, &mut p2);
     }
-    println!("Game ended at state (from your perspective):\n{}", current_player.curr_state);
-    match current_player.curr_state.is_won() {
+    println!("Game ended at state (from your perspective):\n{}", p1.current_state());
+    match p1.current_state().is_won() {
         Some(P1Win) => println!("You won!"),
         Some(P2Win) => println!("You Lost!"),
         Some(Tie) => println!("Tied!?!"),
@@ -796,7 +798,15 @@ fn main() {
             println!("\n----------------\n{}:\n{}\nqval: {:?}\n", action, state, value_fun.get(&state));
         }
         println!("\n----------------\n");
-        play_loop(&mut value_fun, starting_state);
+
+        let p1 = Box::new(HumanPlayer::new(starting_state));
+        let p2 = Box::new({
+            let mut opp_starting_state = starting_state.clone();
+            opp_starting_state.swap_board();
+            AIPlayer::new(opp_starting_state)
+        });
+
+        play_loop(p1, p2, &mut value_fun, starting_state);
     }
 
 }
