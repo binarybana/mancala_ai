@@ -61,6 +61,20 @@ use std::fmt::{self, Formatter, Display};
 mod packed_actions;
 use packed_actions::{Action, SubAction, ActionQueue};
 
+#[derive(Debug, PartialEq)]
+pub enum PlayerTurn {
+    P1,
+    P2,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Outcome {
+    P1Win,
+    P2Win,
+    Tie,
+}
+use Outcome::*;
+
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone, RustcDecodable, RustcEncodable)]
 pub struct GameState {
     houses: [u8; 14],
@@ -84,6 +98,25 @@ impl GameState {
         }
         info!("Checking if game is ended: no... {}, {}", p1_tot, p2_tot);
         return false;
+    }
+
+    /// Is the game a winning final state for current player?
+    /// None here means the game is not done.
+    fn is_won(&self) -> Option<Outcome> {
+        let p1_tot: u8 = self.houses[..6].iter().sum();
+        let p2_tot: u8 = self.houses[7..13].iter().sum();
+        if p1_tot != 0 && p2_tot != 0 {
+            return None;
+        }
+        let p1_tot = p1_tot + self.houses[6];
+        let p2_tot = p2_tot + self.houses[13];
+        if p1_tot > p2_tot {
+            Some(P1Win)
+        } else if p2_tot > p1_tot {
+            Some(P2Win)
+        } else {
+            Some(Tie)
+        }
     }
 
     /// Move other players seeds to their house after a game ends
@@ -411,6 +444,20 @@ mod test {
     }
     
     #[test]
+    fn test_end_game() {
+        let mut state = GameState::new(4);
+        assert_eq!(state.is_won(), None);
+        state.finalize_game();
+        assert_eq!(state.is_won(), Some(Tie));
+        state.houses[13] = 50;
+        assert_eq!(state.is_won(), Some(P2Win));
+        state.houses[0] = 100;
+        assert_eq!(state.is_won(), Some(P1Win));
+        state.swap_board();
+        assert_eq!(state.is_won(), Some(P2Win));
+    }
+
+    #[test]
     fn test_finalize_game() {
         let mut state = GameState::new(4);
         state.finalize_game();
@@ -622,19 +669,26 @@ impl Player for HumanPlayer {
     }
 
     fn take_action(&mut self,
-                   values: &HashMap<GameState, f64>,
-                   epsilon: f64) -> Action {
-        let choices: Vec<Action> = self.curr_state.gen_actions()
-            .collect();
-        println!("Choose from these options:");
-        for (i, choice) in choices.iter().enumerate() {
-            println!("\t({}): {}", i, choice);
-        }
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).expect("Couldn't read stdin");
-        use std::str::FromStr;
-        let index = u8::from_str(&input.trim()).expect("Couldn't parse your input into an integer");
-        assert!(index as usize <= choices.len());
+                   _: &HashMap<GameState, f64>,
+                   _: f64) -> Action {
+        let choices: Vec<Action> = self.curr_state.gen_actions().collect();
+        let index = loop {
+            println!("Choose from these options:");
+            for (i, choice) in choices.iter().enumerate() {
+                println!("\t({}): {}", i, choice);
+            }
+            let mut input = String::new();
+            use std::str::FromStr;
+            use std::io::stdin;
+            if let Err(_) = stdin().read_line(&mut input) {
+                continue;
+            }
+            if let Ok(index) = u8::from_str(&input.trim()) {
+                if (index as usize) < choices.len() {
+                    break index
+                }
+            }
+        };
 
         let action = choices[index as usize];
         debug!("Picked action {} at state \n{}", action, self.curr_state);
@@ -644,9 +698,9 @@ impl Player for HumanPlayer {
     }
 
     fn td_update(&self,
-                 values: &mut HashMap<GameState, f64>,
-                 learning_rate: f64,
-                 discount_factor: f64) {}
+                 _: &mut HashMap<GameState, f64>,
+                 _: f64,
+                 _: f64) {}
 }
 
 
@@ -658,21 +712,37 @@ fn play_loop(values: &mut HashMap<GameState, f64>,
         opp_starting_state.swap_board();
         AIPlayer::new(opp_starting_state)
     };
+    println!("Starting play loop:");
+    println!("Starting state:\n{}", current_player.curr_state);
     loop {
         let action = current_player.take_action(values, 0.0);
         opposing_player.opponent_plays(action);
-        println!("Computer goes. State now:\n{}", opposing_player.curr_state);
+        println!("You played. State now:\n{}", current_player.curr_state);
         if current_player.curr_state.is_ended() {
             break;
         }
         let action = opposing_player.take_action(values, 0.0);
         current_player.opponent_plays(action);
-        if current_player.curr_state.is_ended() {
+        if opposing_player.curr_state.is_ended() {
             break;
         }
-        println!("You went. State now:\n{}", opposing_player.curr_state);
+        println!("Computer went {}. State now (from your perspective):\n{}", action, current_player.curr_state);
+        println!("\n----------------\n");
+        println!("Now considering your options: ");
+        for action in current_player.curr_state.gen_actions() {
+            let mut state = current_player.curr_state;
+            state.evaluate_action(action);
+            println!("\n----------------\n{}:\n{}\nqval: {:?}\n", action, state, values.get(&state));
+        }
+        println!("The current state now again (from your perspective):\n{}", current_player.curr_state);
     }
-    println!("Game ended at state:\n{}", current_player.curr_state);
+    println!("Game ended at state (from your perspective):\n{}", current_player.curr_state);
+    match current_player.curr_state.is_won() {
+        Some(P1Win) => println!("You won!"),
+        Some(P2Win) => println!("You Lost!"),
+        Some(Tie) => println!("Tied!?!"),
+        _ => println!("Not over yet?"),
+    }
 }
     
 fn main() {
@@ -682,13 +752,7 @@ fn main() {
                             .and_then(|d| d.decode())
                             .unwrap_or_else(|e| e.exit());
 
-    let mut starting_state = GameState::new(2);
-    // let mut starting_state = GameState::new(0);
-    // starting_state.houses[4] = 2;
-    // starting_state.houses[5] = 2;
-    // starting_state.houses[1] = 1;
-    // starting_state.houses[10] = 1;
-    // starting_state.houses[12] = 1;
+    let starting_state = GameState::new(1);
     println!("{}", starting_state);
     if args.cmd_train {
         let mut value_fun: HashMap<GameState, f64> = HashMap::with_capacity(1_000);
@@ -699,37 +763,21 @@ fn main() {
                    args.flag_discount_rate,
                    args.flag_num_runs);
 
-        // let mut qvals: Vec<_> = value_fun.values().collect();
-        // qvals.sort_by(|a, b| b.partial_cmp(a).unwrap());
-        // println!("Some top values from value_fun:");
-        // for val in &qvals[..10] {
-        //     println!("\t{}", val);
-        // }
         println!("Number of entries in value function: {}", value_fun.len());
 
         let mut vals = value_fun.iter().collect::<Vec<_>>();
         vals.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
         println!("Here's a few of the top values and states:");
-        for pair in vals.iter().take(5) {
+        for pair in vals.iter().take(2) {
             println!("\n#########\n{}:\n", pair.1);
             println!("{}", pair.0);
-            // let serialized = serde_json::to_string(&vals[..5].to_vec()).unwrap();
-            // println!("serialized = {}", serialized);
+        }
+        vals.sort_by(|a, b| a.1.partial_cmp(b.1).unwrap());
+        println!("Here's a few of the bottom values and states:");
+        for pair in vals.iter().take(2) {
+            println!("\n#########\nValue: {}:\n{}", pair.1, pair.0);
         }
 
-        // for first_move in 0..6 {
-        //     let mut state = GameState::new(4);
-
-        // let a0 = Action::singleton(1u8);
-        // let mut a1 = Action::singleton(4u8);
-        // a1.push_front(5u8);
-        // let a2 = Action::singleton(5u8);
-        //
-        // for action in &[a0, a1, a2] {
-        //     let mut state = starting_state;
-        //     state.evaluate_action(*action);
-        //     println!("{}qval: {:?}", state, value_fun.get(&state));
-        // }
         let encoded: Vec<u8> = encode(&value_fun, SizeLimit::Infinite).unwrap();
         let mut f: File = File::create(args.flag_train.unwrap_or("train.dat".to_string())).unwrap();
         f.write_all(&encoded).unwrap();
@@ -740,21 +788,14 @@ fn main() {
         f.read_to_end(&mut encoded).unwrap();
         let mut value_fun: HashMap<GameState, f64> = decode(&encoded).unwrap();
         println!("Number of values in hash: {}", value_fun.len());
-
-        // for first_move in 0..6 {
-        //     let mut state = GameState::new(4);
-
-        // let a0 = Action::singleton(1u8);
-        // let mut a1 = Action::singleton(4u8);
-        // a1.push_front(5u8);
-        // let a2 = Action::singleton(5u8);
-        //
-        for action in 0..6 {
+        println!();
+        println!("Here are the first possible actions and their values: ");
+        for action in starting_state.gen_actions() {
             let mut state = starting_state;
-            let action = Action::singleton(action as u8);
             state.evaluate_action(action);
-            println!("{}qval: {:?}", state, value_fun.get(&state));
+            println!("\n----------------\n{}:\n{}\nqval: {:?}\n", action, state, value_fun.get(&state));
         }
+        println!("\n----------------\n");
         play_loop(&mut value_fun, starting_state);
     }
 
