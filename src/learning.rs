@@ -1,9 +1,8 @@
+use super::player::{AIPlayer, Player};
 use std::collections::HashMap;
-use super::player::{Player, AIPlayer};
 
 fn dump_counter_stats(lens: &Vec<usize>, header_only: bool) {
-
-    let buckets = vec![0,5,10,15,20,25,30,45,50,60,70,80,90,100];
+    let buckets = vec![0, 5, 10, 15, 20, 25, 30, 45, 50, 60, 70, 80, 90, 100];
     if header_only {
         for buc in buckets.iter() {
             print!("[{:5}] ", buc);
@@ -14,9 +13,10 @@ fn dump_counter_stats(lens: &Vec<usize>, header_only: bool) {
     let mut counts = Vec::new();
 
     for i in 1..buckets.len() {
-        let count = lens.iter()
-                        .filter(|val| **val < buckets[i] && **val >= buckets[i-1])
-                        .count();
+        let count = lens
+            .iter()
+            .filter(|val| **val < buckets[i] && **val >= buckets[i - 1])
+            .count();
         counts.push(count);
     }
     for count in counts.iter() {
@@ -25,18 +25,20 @@ fn dump_counter_stats(lens: &Vec<usize>, header_only: bool) {
     println!("");
 }
 
-use ::mancala::GameState;
+use mancala::GameState;
 
-pub fn sarsa_loop(values: &mut HashMap<GameState, f64>,
-              starting_state: GameState,
-              epsilon: f64,
-              learning_rate: f64,
-              discount_factor: f64,
-              episodes: usize) {
+pub fn sarsa_loop(
+    values: &mut HashMap<GameState, f64>,
+    starting_state: GameState,
+    epsilon: f64,
+    learning_rate: f64,
+    discount_factor: f64,
+    episodes: usize,
+) {
     let print_rate = 1000;
     let mut game_lengths = Vec::with_capacity(print_rate);
     dump_counter_stats(&game_lengths, true);
-    
+
     for episode in 0..episodes {
         let mut current_player = AIPlayer::new(starting_state);
         let mut opposing_player = {
@@ -89,11 +91,10 @@ pub fn sarsa_loop(values: &mut HashMap<GameState, f64>,
             std::mem::swap(&mut current_player, &mut opposing_player);
             info!(">>>>>>>>>>>>>>>>>");
         }
-        if (episode+1) % print_rate == 0 {
+        if (episode + 1) % print_rate == 0 {
             dump_counter_stats(&game_lengths, false);
             game_lengths.clear();
         }
     }
     dump_counter_stats(&game_lengths, false);
 }
-

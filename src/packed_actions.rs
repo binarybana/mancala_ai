@@ -1,4 +1,4 @@
-use std::fmt::{self, Formatter, Display};
+use std::fmt::{self, Display, Formatter};
 
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone)]
 pub struct Action(u64);
@@ -44,9 +44,9 @@ impl ActionQueue for Action {
         action.push_front(subaction);
         action
     }
-    
+
     /// Push subactions to the front of the deque
-    fn push_front(&mut self, action: SubAction){
+    fn push_front(&mut self, action: SubAction) {
         assert!(action < 7);
         let new_len = self.length() as u64 + 1u64;
         assert!(new_len <= MAX_LEN);
@@ -59,8 +59,7 @@ impl ActionQueue for Action {
         let mask_length = new_len * VEC_EL_BITWIDTH;
         let popped_action = (self.0 & (7 << mask_length)) >> mask_length;
         let pop_mask = (1 << (mask_length + 1)) - 1;
-        self.0 = (self.0 & pop_mask)
-            | new_len << LEN_OFFSET; // add new length bits
+        self.0 = (self.0 & pop_mask) | new_len << LEN_OFFSET; // add new length bits
         popped_action as SubAction
     }
 
@@ -68,8 +67,7 @@ impl ActionQueue for Action {
     fn pop_back(&mut self) -> SubAction {
         let new_len = (self.length() - 1) as u64;
         let popped_action = self.0 & 7;
-        self.0 = (self.0 & VEC_MASK) >> VEC_EL_BITWIDTH
-            | new_len << LEN_OFFSET; // add new length bits
+        self.0 = (self.0 & VEC_MASK) >> VEC_EL_BITWIDTH | new_len << LEN_OFFSET; // add new length bits
         popped_action as SubAction
     }
 
@@ -107,18 +105,18 @@ mod test {
         let mut action_list: Action = Action::new();
         assert_eq!(action_list.0, 0);
         action_list.push_front(4);
-        assert_eq!(action_list.0, 4 | (1<<LEN_OFFSET));
+        assert_eq!(action_list.0, 4 | (1 << LEN_OFFSET));
         println!("{:?}", action_list);
         action_list.push_front(3);
-        assert_eq!(action_list.0, 4<<3 | 3 | (2<<LEN_OFFSET));
+        assert_eq!(action_list.0, 4 << 3 | 3 | (2 << LEN_OFFSET));
         assert_eq!(action_list.pop_front(), 4);
-        assert_eq!(action_list.0, 3 | (1<<LEN_OFFSET));
+        assert_eq!(action_list.0, 3 | (1 << LEN_OFFSET));
         action_list.push_front(2);
         println!("{:?}", action_list);
         assert_eq!(action_list.pop_front(), 3);
         assert_eq!(action_list.pop_front(), 2);
         assert_eq!(action_list.0, 0);
         action_list.push_front(3);
-        assert_eq!(action_list.0, 3 | (1<<LEN_OFFSET));
+        assert_eq!(action_list.0, 3 | (1 << LEN_OFFSET));
     }
 }

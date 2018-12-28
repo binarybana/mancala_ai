@@ -1,8 +1,8 @@
 extern crate bincode;
 extern crate rustc_serialize;
 
+use bincode::rustc_serialize::{decode, encode};
 use bincode::SizeLimit;
-use bincode::rustc_serialize::{encode, decode};
 
 use std::fs::File;
 use std::io::{Read, Write};
@@ -45,7 +45,6 @@ struct Args {
     cmd_play: bool,
 }
 
-
 #[macro_use]
 extern crate log;
 extern crate env_logger;
@@ -53,28 +52,30 @@ extern crate rand;
 
 use std::collections::HashMap;
 
-mod packed_actions;
-mod mancala;
-mod player;
 mod learning;
+mod mancala;
+mod packed_actions;
+mod player;
 
 fn main() {
     env_logger::init().unwrap();
     info!("Hello, mancala!");
     let args: Args = Docopt::new(USAGE)
-                            .and_then(|d| d.decode())
-                            .unwrap_or_else(|e| e.exit());
+        .and_then(|d| d.decode())
+        .unwrap_or_else(|e| e.exit());
 
     let starting_state = mancala::GameState::new(1);
     println!("{}", starting_state);
     if args.cmd_train {
         let mut value_fun: HashMap<mancala::GameState, f64> = HashMap::with_capacity(1_000);
-        learning::sarsa_loop(&mut value_fun,
-                   starting_state,
-                   args.flag_epsilon,
-                   args.flag_learning_rate,
-                   args.flag_discount_rate,
-                   args.flag_num_runs);
+        learning::sarsa_loop(
+            &mut value_fun,
+            starting_state,
+            args.flag_epsilon,
+            args.flag_learning_rate,
+            args.flag_discount_rate,
+            args.flag_num_runs,
+        );
 
         println!("Number of entries in value function: {}", value_fun.len());
 
@@ -106,11 +107,16 @@ fn main() {
         for action in starting_state.gen_actions() {
             let mut state = starting_state;
             state.evaluate_action(action);
-            println!("\n----------------\n{}:\n{}\nqval: {:?}\n", action, state, value_fun.get(&state));
+            println!(
+                "\n----------------\n{}:\n{}\nqval: {:?}\n",
+                action,
+                state,
+                value_fun.get(&state)
+            );
         }
         println!("\n----------------\n");
 
-        use player::{HumanPlayer, AIPlayer, Player};
+        use player::{AIPlayer, HumanPlayer, Player};
         let p1 = Box::new(HumanPlayer::new(starting_state));
         let p2 = Box::new({
             let mut opp_starting_state = starting_state.clone();
@@ -118,6 +124,11 @@ fn main() {
             AIPlayer::new(opp_starting_state)
         });
 
-        player::play_loop(p1 as Box<Player>, p2 as Box<Player>, &mut value_fun, starting_state);
+        player::play_loop(
+            p1 as Box<Player>,
+            p2 as Box<Player>,
+            &mut value_fun,
+            starting_state,
+        );
     }
 }
