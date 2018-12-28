@@ -2,6 +2,8 @@ use packed_actions::{Action, ActionQueue, SubAction};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 
+use rand::Rng;
+
 #[derive(Debug, PartialEq)]
 pub enum PlayerTurn {
     P1,
@@ -18,7 +20,7 @@ use self::Outcome::*;
 
 #[derive(Debug, Eq, PartialEq, Hash, Copy, Clone, RustcDecodable, RustcEncodable)]
 pub struct GameState {
-    houses: [u8; 14],
+    pub houses: [u8; 14],
 }
 
 impl GameState {
@@ -63,7 +65,7 @@ impl GameState {
     }
 
     /// Move other players seeds to their house after a game ends
-    fn finalize_game(&mut self) {
+    pub fn finalize_game(&mut self) {
         for i in 7..13 {
             self.houses[13] += self.houses[i];
             self.houses[i] = 0;
@@ -186,7 +188,7 @@ impl GameState {
     }
 }
 
-struct ActionIter<'a> {
+pub struct ActionIter<'a> {
     action: Action,
     base_state: &'a GameState,
     state_stack: Vec<GameState>,

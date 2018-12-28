@@ -17,12 +17,12 @@ pub trait Player {
 const DEFAULT_STATE_VAL: f64 = 0.5f64;
 
 pub struct AIPlayer {
-    curr_state: GameState,
-    last_state: GameState,
+    pub curr_state: GameState,
+    pub last_state: GameState,
 }
 
 impl AIPlayer {
-    fn new(starting_state: GameState) -> AIPlayer {
+    pub fn new(starting_state: GameState) -> AIPlayer {
         AIPlayer {
             curr_state: starting_state.clone(),
             last_state: starting_state.clone(),
@@ -81,7 +81,7 @@ pub struct HumanPlayer {
 }
 
 impl HumanPlayer {
-    fn new(starting_state: GameState) -> HumanPlayer {
+    pub fn new(starting_state: GameState) -> HumanPlayer {
         HumanPlayer {
             curr_state: starting_state.clone(),
         }
