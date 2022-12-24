@@ -151,10 +151,9 @@ impl Player for HumanPlayer {
 }
 
 pub fn play_loop(
-    mut p1: Box<Player>,
-    mut p2: Box<Player>,
+    mut p1: Box<dyn Player>,
+    mut p2: Box<dyn Player>,
     values: &mut HashMap<GameState, f64>,
-    starting_state: GameState,
 ) {
     println!("Starting play loop:");
     println!("Starting state:\n{}", p1.current_state());
@@ -170,9 +169,10 @@ pub fn play_loop(
         "Game ended at state (from your perspective):\n{}",
         p1.current_state()
     );
+    use crate::mancala::Outcome::*;
     match p1.current_state().is_won() {
-        Some(P1Win) => println!("You won!"),
-        Some(P2Win) => println!("You Lost!"),
+        Some(P1win) => println!("You won!"),
+        Some(P2win) => println!("You Lost!"),
         Some(Tie) => println!("Tied!?!"),
         _ => println!("Not over yet?"),
     }

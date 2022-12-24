@@ -1,24 +1,19 @@
 use packed_actions::{Action, ActionQueue, SubAction};
+use rand::seq::SliceRandom;
+
+extern crate serde;
+use self::serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 
-use rand::Rng;
-
-#[derive(Debug, PartialEq)]
-pub enum PlayerTurn {
-    P1,
-    P2,
-}
-
 #[derive(Debug, PartialEq)]
 pub enum Outcome {
-    P1Win,
-    P2Win,
+    P1win,
+    P2win,
     Tie,
 }
-use self::Outcome::*;
 
-#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone, RustcDecodable, RustcEncodable)]
+#[derive(Debug, Eq, PartialEq, Hash, Copy, Clone, Serialize, Deserialize)]
 pub struct GameState {
     pub houses: [u8; 14],
 }
@@ -55,10 +50,11 @@ impl GameState {
         }
         let p1_tot = p1_tot + self.houses[6];
         let p2_tot = p2_tot + self.houses[13];
+        use self::Outcome::*;
         if p1_tot > p2_tot {
-            Some(P1Win)
+            Some(P1win)
         } else if p2_tot > p1_tot {
-            Some(P2Win)
+            Some(P2win)
         } else {
             Some(Tie)
         }
@@ -157,7 +153,8 @@ impl GameState {
         let mut best = &choices[0];
         if rand::random::<f64>() < epsilon {
             // randomly make a move
-            best = rand::thread_rng().choose(&choices).unwrap();
+            let mut rng = rand::thread_rng();
+            best = choices.choose(&mut rng).unwrap();
         } else {
             for choice in &choices {
                 if choice.1 > best.1 {
@@ -277,25 +274,25 @@ impl<'a> Iterator for ActionIter<'a> {
 impl Display for GameState {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         // upper row
-        try!(write!(
+        write!(
             f,
             "+-------------------------------+\n\
              |   |"
-        ));
+        )?;
         // player 2
         for house in self.houses[7..13].iter().rev() {
-            try!(write!(f, "{:2} |", house));
+            write!(f, "{:2} |", house)?;
         }
         // end zones
-        try!(write!(
+        write!(
             f,
             "   |\n|{:2} |                       |{:2} |\n\
              |   |",
             self.houses[13], self.houses[6]
-        ));
+        )?;
         // player 1
         for house in &self.houses[0..6] {
-            try!(write!(f, "{:2} |", house));
+            write!(f, "{:2} |", house)?;
         }
         // last line
         write!(f, "   |\n+-------------------------------+\n")
@@ -453,7 +450,7 @@ mod test {
     #[test]
     fn test_player() {
         let mut state = GameState::new(4);
-        let mut p1 = AIPlayer::new(state);
+        let mut p1 = crate::player::AIPlayer::new(state);
         let mut value_fun: HashMap<GameState, f64> = HashMap::new();
         let action = Action::singleton(4);
         state.evaluate_action(action);

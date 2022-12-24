@@ -7,13 +7,13 @@ pub type SubAction = u8;
 impl Display for Action {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let mut copy = self.clone();
-        try!(write!(f, "(len: {}; ", self.length()));
+        write!(f, "(len: {}; ", self.length())?;
         let mut vals = Vec::new();
         while !copy.is_empty() {
             vals.push(copy.pop_front());
         }
         for val in vals.iter() {
-            try!(write!(f, "{},", val));
+            write!(f, "{},", val)?;
         }
         write!(f, ")")
     }
