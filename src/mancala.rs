@@ -1,4 +1,4 @@
-use packed_actions::{Action, ActionQueue, SubAction};
+use crate::packed_actions::{Action, ActionQueue, SubAction};
 use rand::seq::SliceRandom;
 
 extern crate serde;
@@ -60,11 +60,26 @@ impl GameState {
         }
     }
 
-    /// Move other players seeds to their house after a game ends
+    /// Move remaining seeds to the appropriate player's store after a game ends
     pub fn finalize_game(&mut self) {
-        for i in 7..13 {
-            self.houses[13] += self.houses[i];
-            self.houses[i] = 0;
+        // Assert that the game is actually over (at least one side is empty)
+        let p1_empty = self.houses[..6].iter().sum::<u8>() == 0;
+        let p2_empty = self.houses[7..13].iter().sum::<u8>() == 0;
+        assert!(p1_empty || p2_empty, "Cannot finalize a game that is not over");
+        
+        // If player 1's side is empty, move player 2's remaining seeds to their store
+        if p1_empty {
+            for i in 7..13 {
+                self.houses[13] += self.houses[i];
+                self.houses[i] = 0;
+            }
+        } 
+        // If player 2's side is empty, move player 1's remaining seeds to their store
+        else if p2_empty {
+            for i in 0..6 {
+                self.houses[6] += self.houses[i];
+                self.houses[i] = 0;
+            }
         }
     }
 
@@ -279,10 +294,12 @@ impl Display for GameState {
             "+-------------------------------+\n\
              |   |"
         )?;
-        // player 2
+        
+        // player 2 cells
         for house in self.houses[7..13].iter().rev() {
             write!(f, "{:2} |", house)?;
         }
+        
         // end zones
         write!(
             f,
@@ -290,10 +307,12 @@ impl Display for GameState {
              |   |",
             self.houses[13], self.houses[6]
         )?;
-        // player 1
+        
+        // player 1 cells
         for house in &self.houses[0..6] {
             write!(f, "{:2} |", house)?;
         }
+        
         // last line
         write!(f, "   |\n+-------------------------------+\n")
     }

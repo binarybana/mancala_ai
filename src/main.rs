@@ -35,6 +35,8 @@ enum Commands {
         learning_rate: f64,
     },
     Play {},
+    /// Play with TUI interface showing move analysis
+    PlayTUI {},
 }
 
 #[macro_use]
@@ -48,13 +50,14 @@ mod learning;
 mod mancala;
 mod packed_actions;
 mod player;
+mod tui;
 
 fn main() {
     env_logger::init();
     info!("Hello, mancala!");
     let args = Args::parse();
 
-    let starting_state = mancala::GameState::new(1);
+    let starting_state = mancala::GameState::new(4);
     println!("{}", starting_state);
     match &args.command {
         Some(Commands::Play {}) => {
@@ -86,6 +89,18 @@ fn main() {
             });
 
             player::play_loop(p1 as Box<dyn Player>, p2 as Box<dyn Player>, &mut value_fun);
+        }
+        Some(Commands::PlayTUI {}) => {
+            let mut f: File = File::open(args.train.unwrap_or("train.dat".to_string())).unwrap();
+            let mut encoded = Vec::new();
+            f.read_to_end(&mut encoded).unwrap();
+            let value_fun: HashMap<mancala::GameState, f64> = from_bytes(&encoded).unwrap();
+            println!("Number of values in hash: {}", value_fun.len());
+            println!("Starting TUI interface...");
+            
+            if let Err(err) = tui::run_tui(starting_state, &value_fun) {
+                eprintln!("Error running TUI: {}", err);
+            }
         }
         Some(Commands::Train {
             num_runs,

@@ -1,5 +1,5 @@
-use mancala::GameState;
-use packed_actions::Action;
+use crate::mancala::GameState;
+use crate::packed_actions::Action;
 use std::collections::HashMap;
 
 pub trait Player {
@@ -165,15 +165,24 @@ pub fn play_loop(
         }
         std::mem::swap(&mut p1, &mut p2);
     }
+    // Get a mutable copy of the current state to properly finalize it
+    let mut final_state = p1.current_state().clone();
+    // Finalize the game to move stones to the correct stores
+    final_state.finalize_game();
+    
     println!(
         "Game ended at state (from your perspective):\n{}",
-        p1.current_state()
+        final_state
     );
+    
     use crate::mancala::Outcome::*;
-    match p1.current_state().is_won() {
-        Some(P1win) => println!("You won!"),
-        Some(P2win) => println!("You Lost!"),
-        Some(Tie) => println!("Tied!?!"),
+    match final_state.is_won() {
+        Some(P1win) => println!("You won! Final score: {}-{}", 
+                               final_state.houses[6], final_state.houses[13]),
+        Some(P2win) => println!("You Lost! Final score: {}-{}", 
+                              final_state.houses[6], final_state.houses[13]),
+        Some(Tie) => println!("It's a tie! Final score: {}-{}", 
+                            final_state.houses[6], final_state.houses[13]),
         _ => println!("Not over yet?"),
     }
 }

@@ -25,7 +25,7 @@ fn dump_counter_stats(lens: &Vec<usize>, header_only: bool) {
     println!("");
 }
 
-use mancala::GameState;
+use crate::mancala::GameState;
 
 pub fn sarsa_loop(
     values: &mut HashMap<GameState, f64>,
@@ -37,6 +37,7 @@ pub fn sarsa_loop(
 ) {
     let print_rate = 1000;
     let mut game_lengths = Vec::with_capacity(print_rate);
+    println!("Game length histogram:");
     dump_counter_stats(&game_lengths, true);
 
     for episode in 0..episodes {

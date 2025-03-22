@@ -7,15 +7,17 @@ pub type SubAction = u8;
 impl Display for Action {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let mut copy = self.clone();
-        write!(f, "(len: {}; ", self.length())?;
         let mut vals = Vec::new();
         while !copy.is_empty() {
             vals.push(copy.pop_front());
         }
-        for val in vals.iter() {
-            write!(f, "{},", val)?;
+        
+        // Format as cell numbers (adding 1 for human-readable 1-indexed positions)
+        if vals.len() == 1 {
+            write!(f, "Cell {}", vals[0] + 1)
+        } else {
+            write!(f, "Cells {}", vals.iter().map(|v| (v + 1).to_string()).collect::<Vec<_>>().join(" → "))
         }
-        write!(f, ")")
     }
 }
 
